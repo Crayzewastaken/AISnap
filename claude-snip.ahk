@@ -11,9 +11,11 @@
 ; ============================================================================
 
 cfg := A_ScriptDir "\config.ini"
+SetTitleMatchMode(2)              ; match the Claude window by a partial title
 
 ; --- settings (read from config.ini, with safe fallbacks) -------------------
-global WinMatch     := IniRead(cfg, "Claude",   "WinMatch",       "ahk_exe Claude.exe")
+global WinMatch     := IniRead(cfg, "Claude",   "WinMatch",       "Claude ahk_exe Claude.exe")
+global LaunchID     := IniRead(cfg, "Claude",   "LaunchID",       "Claude_pzs8sxrjxfjjc!Claude")
 global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
 global AutoPost     := IniRead(cfg, "Behavior", "AutoPostOnSnip", "0")
 
@@ -85,14 +87,25 @@ PostToClaude(*) {
         WinActivate("ahk_id " prev)
 }
 
-; Bring the Claude desktop window to the front. Returns 0 if not found.
+; Bring the Claude desktop window to the front — whatever state it's in.
+; Handles: focused, minimised, hidden to the tray, or not running at all.
 FocusClaude() {
-    global WinMatch
-    if !WinExist(WinMatch) {
-        TrayTip("Claude window not found",
-                "Open the Claude desktop app, or set WinMatch in config.ini.", 3)
-        return 0
+    global WinMatch, LaunchID
+    DetectHiddenWindows(true)                  ; so tray-hidden windows count
+    id := WinExist(WinMatch)
+    if !id {                                   ; not running — launch it
+        if (LaunchID != "")
+            Run("explorer.exe shell:AppsFolder\" LaunchID)
+        if !WinWait(WinMatch, , 8) {
+            TrayTip("Couldn't open Claude",
+                    "Check LaunchID / WinMatch in config.ini.", 3)
+            return 0
+        }
+        id := WinExist(WinMatch)
     }
-    WinActivate(WinMatch)
-    return WinWaitActive(WinMatch, , 2)
+    if (WinGetMinMax("ahk_id " id) = -1)       ; -1 = minimised
+        WinRestore("ahk_id " id)
+    WinShow("ahk_id " id)                       ; un-hide if it was in the tray
+    WinActivate("ahk_id " id)
+    return WinWaitActive("ahk_id " id, , 3)
 }
