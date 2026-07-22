@@ -1,5 +1,7 @@
 # ClaudeSnap
 
+I basically wanted a way to have my screenshots and texts (that i copy/paste) automatically be sent to the last current claude chat open. This way, I am saving time by being able to have it do exactly that, and be off-tab and submit it to claude as well. Enjoy :)
+
 Snip a piece of your screen — or paste your clipboard — **straight into the Claude desktop app** with one keypress, without stopping what you're doing.
 
 - **Ctrl + Alt + S** → drag a box on screen → the screenshot drops into Claude's message box.
