@@ -20,14 +20,16 @@ global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
 global AutoPost     := IniRead(cfg, "Behavior", "AutoPostOnSnip", "0")
 global Debug        := IniRead(cfg, "Behavior", "Debug",          "0")
 
-keySnip  := IniRead(cfg, "Hotkeys", "SnipAndSend",   "!1")
-keyPaste := IniRead(cfg, "Hotkeys", "SendClipboard", "!2")
-keyPost  := IniRead(cfg, "Hotkeys", "Post",          "!3")
+keySnip := IniRead(cfg, "Hotkeys", "SnipAndSend",    "!1")
+keySel  := IniRead(cfg, "Hotkeys", "CopySelection",  "!2")
+keyAll  := IniRead(cfg, "Hotkeys", "CopyAllOnPage",  "!3")
+keyPost := IniRead(cfg, "Hotkeys", "Post",           "!0")
 
 ; --- bind the hotkeys -------------------------------------------------------
-Hotkey(keySnip,  SnipAndSend)
-Hotkey(keyPaste, SendClipboardText)
-Hotkey(keyPost,  PostToClaude)
+Hotkey(keySnip, SnipAndSend)
+Hotkey(keySel,  CopySelectionToClaude)
+Hotkey(keyAll,  CopyAllToClaude)
+Hotkey(keyPost, PostToClaude)
 
 ; --- tray menu (friendly for non-coders) ------------------------------------
 A_TrayMenu.Delete()
@@ -40,49 +42,75 @@ A_TrayMenu.Add()
 A_TrayMenu.Add("Exit", (*) => ExitApp())
 
 TrayTip("ClaudeSnap is running",
-        "Snip: " keySnip "    Paste: " keyPaste "    Post: " keyPost, 1)
+        "Snip: " keySnip "   Copy: " keySel "   All: " keyAll "   Send: " keyPost, 1)
 
 ; ============================================================================
 ;  actions
 ; ============================================================================
 
-; Grab a region of the screen and drop it into Claude's message box.
+; Alt+1 — grab a region of the screen and drop it into Claude's message box.
 SnipAndSend(*) {
-    global WinMatch, RestoreFocus, AutoPost
-    Log("SnipAndSend fired")
+    global RestoreFocus, AutoPost
+    Log("Snip fired")
     prev := WinActive("A")
+    KeyWait("Alt", "T1")              ; let go of Alt so the snip key isn't mangled
     A_Clipboard := ""                 ; clear so we can detect the new snip
     Send("#+s")                       ; Windows built-in "snip region to clipboard"
     if !ClipWait(60, 1)               ; wait up to 60s for the snip (1 = images too)
         return
-    if !FocusClaude()
-        return
-    Send("^v")
-    Sleep(200)                        ; let the image attach
+    PasteIntoClaude(prev, 200)
     if (AutoPost = "1")
-        Send("{Enter}")
-    if (RestoreFocus = "1" && prev)
-        WinActivate("ahk_id " prev)
+        Post(prev)
 }
 
-; Paste whatever is already on the clipboard (text or image) into Claude.
-SendClipboardText(*) {
-    global RestoreFocus
-    Log("SendClipboard fired")
+; Alt+2 — copy whatever text is highlighted right now, then send it to Claude.
+CopySelectionToClaude(*) {
+    Log("CopySelection fired")
+    GrabTextToClaude("^c")
+}
+
+; Alt+3 — select everything on the page, copy it, then send it to Claude.
+CopyAllToClaude(*) {
+    Log("CopyAll fired")
+    GrabTextToClaude("^a^c")
+}
+
+; Copy from the user's current window (using copyKeys), then paste into Claude.
+GrabTextToClaude(copyKeys) {
     prev := WinActive("A")
+    KeyWait("Alt", "T1")              ; release Alt or ^c becomes ^!c and fails
+    A_Clipboard := ""                 ; clear so we know when the copy lands
+    Send(copyKeys)                    ; copy happens in the window you're in
+    if !ClipWait(2) {                 ; wait up to 2s for text
+        TrayTip("Nothing copied", "No text was selected to send.", 2)
+        return
+    }
+    PasteIntoClaude(prev, 120)
+}
+
+; Alt+0 — send / post the current message.
+PostToClaude(*) {
+    Log("Post fired")
+    Post(WinActive("A"))
+}
+
+; --- shared helpers ---------------------------------------------------------
+
+; Focus Claude, paste the clipboard, then hand focus back.
+PasteIntoClaude(prev, settle) {
+    global RestoreFocus
     if !FocusClaude()
         return
     Send("^v")
-    Sleep(120)
+    Sleep(settle)                     ; let it attach before we leave
     if (RestoreFocus = "1" && prev)
         WinActivate("ahk_id " prev)
 }
 
-; Send / post the current message (Enter inside Claude).
-PostToClaude(*) {
+; Focus Claude, press Enter, then hand focus back.
+Post(prev) {
     global RestoreFocus
-    Log("Post fired")
-    prev := WinActive("A")
+    KeyWait("Alt", "T1")
     if !FocusClaude()
         return
     Send("{Enter}")

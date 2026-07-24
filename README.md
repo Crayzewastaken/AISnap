@@ -5,8 +5,9 @@ I basically wanted a way to have my screenshots and texts (that i copy/paste) au
 Snip a piece of your screen — or paste your clipboard — **straight into the Claude desktop app** with one keypress, without stopping what you're doing.
 
 - **Alt + 1** → drag a box on screen → the screenshot drops into Claude's message box.
-- **Alt + 2** → paste whatever is on your clipboard (text or image) into Claude.
-- **Alt + 3** → post it (presses Enter in Claude).
+- **Alt + 2** → copies the text you have **highlighted** and sends it to Claude.
+- **Alt + 3** → **selects everything** on the page, copies it, and sends it to Claude.
+- **Alt + 0** → post it (presses Enter in Claude).
 
 You stay on your own screen the whole time — ClaudeSnap flicks over to Claude, drops the content, and flicks back. All three keys are yours to change (see [Customising](#customising)).
 
@@ -20,7 +21,7 @@ You stay on your own screen the whole time — ClaudeSnap flicks over to Claude,
 2. **Download this repo**: green **Code** button → **Download ZIP** → unzip it anywhere (e.g. your Documents).
 3. **Double-click `claude-snip.ahk`.**
 
-That's it. A small green **H** icon appears in your system tray (bottom-right, near the clock) — ClaudeSnap is running. Open the Claude desktop app and try **Alt + 1**.
+That's it. A small green **H** icon appears in your system tray (bottom-right, near the clock) — ClaudeSnap is running. Open the Claude desktop app, highlight some text anywhere, and try **Alt + 2**.
 
 ---
 
@@ -29,10 +30,11 @@ That's it. A small green **H** icon appears in your system tray (bottom-right, n
 | Do this | Press |
 |---|---|
 | Screenshot part of your screen into Claude | **Alt + 1**, then drag a box |
-| Push copied text or a copied image into Claude | **Alt + 2** |
-| Send the message | **Alt + 3** |
+| Send the text you've highlighted | **Alt + 2** |
+| Send everything on the page (select-all) | **Alt + 3** |
+| Post the message | **Alt + 0** |
 
-Typical flow: **Alt+1**, drag over the thing you want, then **Alt+3** to send. Two keypresses, never leaving your work.
+Typical flow: highlight some text → **Alt+2** → **Alt+0** to send. Or **Alt+1**, drag a box, **Alt+0**. Never leaving your work.
 
 Prefer it to send the screenshot the instant you finish dragging? Set `AutoPostOnSnip = 1` in the config (below) and you can skip the Post key.
 
