@@ -33,11 +33,11 @@ Hotkey(keyPost, PostToClaude)
 
 ; --- tray menu (friendly for non-coders) ------------------------------------
 A_TrayMenu.Delete()
-A_TrayMenu.Add("ClaudeSnap", (*) => 0)
-A_TrayMenu.Disable("ClaudeSnap")
+A_TrayMenu.Add("Settings…", (*) => ShowSettings())
+A_TrayMenu.Default := "Settings…"          ; double-click the tray icon opens it
 A_TrayMenu.Add()
-A_TrayMenu.Add("Edit hotkeys (config.ini)", (*) => Run(cfg))
-A_TrayMenu.Add("Reload after editing",      (*) => Reload())
+A_TrayMenu.Add("Edit config.ini directly", (*) => Run(cfg))
+A_TrayMenu.Add("Reload", (*) => Reload())
 A_TrayMenu.Add()
 A_TrayMenu.Add("Exit", (*) => ExitApp())
 
@@ -149,4 +149,48 @@ Log(msg) {
     global Debug
     if (Debug = "1")
         try FileAppend(FormatTime(, "HH:mm:ss") "  " msg "`n", A_ScriptDir "\claudesnap.log")
+}
+
+; A tiny settings window — click a box, press the keys you want, Save.
+ShowSettings(*) {
+    global cfg
+    g := Gui("+AlwaysOnTop -MinimizeBox", "ClaudeSnap settings")
+    g.SetFont("s10", "Segoe UI")
+    g.Add("Text", "xm", "Click a box, then press the keys you'd like to use:")
+
+    g.Add("Text",   "xm y+14 w180",       "Snip screenshot → Claude")
+    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "SnipAndSend",   "!1"))
+    g.Add("Text",   "xm y+10 w180",       "Copy highlighted → Claude")
+    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopySelection", "!2"))
+    g.Add("Text",   "xm y+10 w180",       "Select-all page → Claude")
+    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!3"))
+    g.Add("Text",   "xm y+10 w180",       "Send / post message")
+    hkPost := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "Post",          "!0"))
+
+    cbRestore := g.Add("Checkbox", "xm y+16", "Return to my window after each action")
+    cbRestore.Value := (IniRead(cfg, "Behavior", "RestoreFocus",   "1") = "1")
+    cbAuto := g.Add("Checkbox", "xm y+8", "Send screenshot the moment I finish snipping")
+    cbAuto.Value := (IniRead(cfg, "Behavior", "AutoPostOnSnip", "0") = "1")
+
+    g.Add("Button", "xm y+18 w120 Default", "Save && Reload").OnEvent("Click", Save)
+    g.Add("Button", "x+10 w90", "Cancel").OnEvent("Click", (*) => g.Destroy())
+    g.OnEvent("Escape", (*) => g.Destroy())
+    g.Show()
+
+    Save(*) {
+        for hk in [hkSnip, hkSel, hkAll, hkPost] {
+            if (hk.Value = "") {
+                MsgBox("Every box needs a key combo.", "ClaudeSnap", "Iconx 4096")
+                return
+            }
+        }
+        IniWrite(hkSnip.Value, cfg, "Hotkeys", "SnipAndSend")
+        IniWrite(hkSel.Value,  cfg, "Hotkeys", "CopySelection")
+        IniWrite(hkAll.Value,  cfg, "Hotkeys", "CopyAllOnPage")
+        IniWrite(hkPost.Value, cfg, "Hotkeys", "Post")
+        IniWrite(cbRestore.Value ? "1" : "0", cfg, "Behavior", "RestoreFocus")
+        IniWrite(cbAuto.Value    ? "1" : "0", cfg, "Behavior", "AutoPostOnSnip")
+        g.Destroy()
+        Reload()                                ; restart with the new keys
+    }
 }

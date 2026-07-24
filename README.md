@@ -42,10 +42,10 @@ Prefer it to send the screenshot the instant you finish dragging? Set `AutoPostO
 
 ## Customising
 
-Everything is in **`config.ini`** — right-click the tray icon → **Edit hotkeys (config.ini)**. Change what you like, save, then right-click the tray icon → **Reload after editing**.
+**Easiest way:** double-click the tray icon (or right-click → **Settings…**). A little window opens — click any box, press the keys you want, tick your options, hit **Save & Reload**. Done.
 
-Hotkey symbols: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key.
-So `!1` is Alt+1, `+#a` is Shift+Win+A, and `^!s` would be Ctrl+Alt+S.
+Prefer editing by hand? Everything lives in **`config.ini`** (tray → **Edit config.ini directly**, then **Reload**).
+Hotkey symbols there: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key — so `!1` is Alt+1.
 (Heads up: Ctrl+Alt combos can clash with **AltGr** on some keyboards and silently do nothing — that's why the defaults are plain Alt.)
 
 ---
