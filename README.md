@@ -4,9 +4,9 @@ I basically wanted a way to have my screenshots and texts (that i copy/paste) au
 
 Snip a piece of your screen — or paste your clipboard — **straight into the Claude desktop app** with one keypress, without stopping what you're doing.
 
-- **Ctrl + Alt + S** → drag a box on screen → the screenshot drops into Claude's message box.
-- **Ctrl + Alt + D** → paste whatever is on your clipboard (text or image) into Claude.
-- **Ctrl + Alt + F** → post it (presses Enter in Claude).
+- **Alt + 1** → drag a box on screen → the screenshot drops into Claude's message box.
+- **Alt + 2** → paste whatever is on your clipboard (text or image) into Claude.
+- **Alt + 3** → post it (presses Enter in Claude).
 
 You stay on your own screen the whole time — ClaudeSnap flicks over to Claude, drops the content, and flicks back. All three keys are yours to change (see [Customising](#customising)).
 
@@ -20,7 +20,7 @@ You stay on your own screen the whole time — ClaudeSnap flicks over to Claude,
 2. **Download this repo**: green **Code** button → **Download ZIP** → unzip it anywhere (e.g. your Documents).
 3. **Double-click `claude-snip.ahk`.**
 
-That's it. A small green **H** icon appears in your system tray (bottom-right, near the clock) — ClaudeSnap is running. Open the Claude desktop app and try **Ctrl + Alt + S**.
+That's it. A small green **H** icon appears in your system tray (bottom-right, near the clock) — ClaudeSnap is running. Open the Claude desktop app and try **Alt + 1**.
 
 ---
 
@@ -28,11 +28,11 @@ That's it. A small green **H** icon appears in your system tray (bottom-right, n
 
 | Do this | Press |
 |---|---|
-| Screenshot part of your screen into Claude | **Ctrl + Alt + S**, then drag a box |
-| Push copied text or a copied image into Claude | **Ctrl + Alt + D** |
-| Send the message | **Ctrl + Alt + F** |
+| Screenshot part of your screen into Claude | **Alt + 1**, then drag a box |
+| Push copied text or a copied image into Claude | **Alt + 2** |
+| Send the message | **Alt + 3** |
 
-Typical flow: **Ctrl+Alt+S**, drag over the thing you want, then **Ctrl+Alt+F** to send. Two keypresses, never leaving your work.
+Typical flow: **Alt+1**, drag over the thing you want, then **Alt+3** to send. Two keypresses, never leaving your work.
 
 Prefer it to send the screenshot the instant you finish dragging? Set `AutoPostOnSnip = 1` in the config (below) and you can skip the Post key.
 
@@ -43,7 +43,8 @@ Prefer it to send the screenshot the instant you finish dragging? Set `AutoPostO
 Everything is in **`config.ini`** — right-click the tray icon → **Edit hotkeys (config.ini)**. Change what you like, save, then right-click the tray icon → **Reload after editing**.
 
 Hotkey symbols: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key.
-So `^!s` is Ctrl+Alt+S, `+#a` is Shift+Win+A, and `<^<!s` forces the *left-hand* Ctrl and Alt specifically.
+So `!1` is Alt+1, `+#a` is Shift+Win+A, and `^!s` would be Ctrl+Alt+S.
+(Heads up: Ctrl+Alt combos can clash with **AltGr** on some keyboards and silently do nothing — that's why the defaults are plain Alt.)
 
 ---
 

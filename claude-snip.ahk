@@ -18,10 +18,11 @@ global WinMatch     := IniRead(cfg, "Claude",   "WinMatch",       "Claude ahk_ex
 global LaunchID     := IniRead(cfg, "Claude",   "LaunchID",       "Claude_pzs8sxrjxfjjc!Claude")
 global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
 global AutoPost     := IniRead(cfg, "Behavior", "AutoPostOnSnip", "0")
+global Debug        := IniRead(cfg, "Behavior", "Debug",          "0")
 
-keySnip  := IniRead(cfg, "Hotkeys", "SnipAndSend",   "^!s")
-keyPaste := IniRead(cfg, "Hotkeys", "SendClipboard", "^!d")
-keyPost  := IniRead(cfg, "Hotkeys", "Post",          "^!f")
+keySnip  := IniRead(cfg, "Hotkeys", "SnipAndSend",   "!1")
+keyPaste := IniRead(cfg, "Hotkeys", "SendClipboard", "!2")
+keyPost  := IniRead(cfg, "Hotkeys", "Post",          "!3")
 
 ; --- bind the hotkeys -------------------------------------------------------
 Hotkey(keySnip,  SnipAndSend)
@@ -48,6 +49,7 @@ TrayTip("ClaudeSnap is running",
 ; Grab a region of the screen and drop it into Claude's message box.
 SnipAndSend(*) {
     global WinMatch, RestoreFocus, AutoPost
+    Log("SnipAndSend fired")
     prev := WinActive("A")
     A_Clipboard := ""                 ; clear so we can detect the new snip
     Send("#+s")                       ; Windows built-in "snip region to clipboard"
@@ -66,6 +68,7 @@ SnipAndSend(*) {
 ; Paste whatever is already on the clipboard (text or image) into Claude.
 SendClipboardText(*) {
     global RestoreFocus
+    Log("SendClipboard fired")
     prev := WinActive("A")
     if !FocusClaude()
         return
@@ -78,6 +81,7 @@ SendClipboardText(*) {
 ; Send / post the current message (Enter inside Claude).
 PostToClaude(*) {
     global RestoreFocus
+    Log("Post fired")
     prev := WinActive("A")
     if !FocusClaude()
         return
@@ -107,5 +111,14 @@ FocusClaude() {
         WinRestore("ahk_id " id)
     WinShow("ahk_id " id)                       ; un-hide if it was in the tray
     WinActivate("ahk_id " id)
-    return WinWaitActive("ahk_id " id, , 3)
+    ok := WinWaitActive("ahk_id " id, , 3)
+    Log("FocusClaude id=" id " activated=" (ok ? "yes" : "no"))
+    return ok
+}
+
+; Write a line to claudesnap.log when Debug=1 in config.ini.
+Log(msg) {
+    global Debug
+    if (Debug = "1")
+        try FileAppend(FormatTime(, "HH:mm:ss") "  " msg "`n", A_ScriptDir "\claudesnap.log")
 }
