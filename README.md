@@ -51,13 +51,21 @@ Typical flow: highlight some text → **Alt+3**. That's it — it's already sent
 
 It works with whatever dictation app you already use — AI Snap doesn't do the transcribing. A good free one is **[Handy](https://handy.computer)**: open source, runs entirely offline, push-to-talk.
 
+**Get Handy** — right-click the tray icon → **Get Handy (voice dictation)…**, or run:
+
+```bash
+winget install --id cjpais.Handy -e
+```
+
+Already have it? Nothing to do — AI Snap uses whatever is already installed.
+
 How it goes:
 
 1. Press **Alt + 1** — your AI chat comes to the front.
 2. Hold your usual push-to-talk key (Handy's is `Ctrl+Space` out of the box) and say your piece.
 3. Let go. Your words get typed into the chat and sent automatically.
 
-Tell AI Snap which key you use in **Settings → "My dictation push-to-talk key"** — it must match the one set in Handy (*Handy → Settings → Shortcuts → transcribe*).
+Tell AI Snap which key you use in **Settings → "My dictation push-to-talk key"** — it must match Handy's **Transcribe Shortcut** (*Handy → General*). Leave Handy's **Push To Talk** switched on.
 
 If messages get sent before you've finished, raise `Wait` under `[Dictation]` in `config.ini` — that's how long AI Snap pauses after you stop talking to let the transcription land (2500 ms by default). Lower it if you're left waiting around.
 

@@ -11,6 +11,7 @@
 
 cfg := A_ScriptDir "\config.ini"
 SetTitleMatchMode(2)              ; allow partial window-title matches
+InstallKeybdHook()                ; see keys even when another app swallows them
 
 ; --- settings (read from config.ini, with safe fallbacks) -------------------
 global Apps         := LoadApps()
@@ -35,11 +36,19 @@ Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
 
+; Watch for your dictation key being released. The "~" means we only listen —
+; the keystroke still reaches Handy exactly as normal.
+global Armed := false, ArmedPrev := 0
+try Hotkey("~" DictationKey " up", DictationFinished)
+catch
+    TrayTip("Check your dictation key", "'" DictationKey "' isn't a key name.", 3)
+
 ; --- tray menu --------------------------------------------------------------
 A_TrayMenu.Delete()
 A_TrayMenu.Add("Settings…", (*) => ShowSettings())
 A_TrayMenu.Default := "Settings…"          ; double-click the tray icon opens it
 A_TrayMenu.Add()
+A_TrayMenu.Add("Get Handy (voice dictation)…", (*) => InstallHandy())
 A_TrayMenu.Add("Edit config.ini directly", (*) => Run(cfg))
 A_TrayMenu.Add("Reload", (*) => Reload())
 A_TrayMenu.Add()
@@ -59,20 +68,37 @@ TrayTip("AI Snap is running",
 DictateToAI(*) {
     global RestoreFocus, AutoSend, DictationKey, DictationWait
     Log("Dictate fired")
+    global Armed, ArmedPrev, DictationKey
     prev := WinActive("A")
     KeyWait("Alt", "T1")              ; never hold Alt near F4 — that's Alt+F4
     if !FocusTarget()
         return
-    if !KeyWait(DictationKey, "D T30") {          ; wait for you to start talking
-        TrayTip("Nothing dictated",
-                "Didn't see " DictationKey " within 30s. Is Handy running?", 2)
-        GoBack(prev)
-        return
-    }
-    KeyWait(DictationKey)                          ; ...and to stop
-    Sleep(DictationWait)                           ; let it transcribe and type
+    ArmedPrev := prev
+    Armed := true                     ; the next dictation gets sent for us
+    SetTimer(Disarm, -30000)          ; ...unless you never get around to it
+    TrayTip("Listening…", "Hold " DictationKey " and talk.", 1)
+}
+
+; Fires when you let go of the dictation key, but only if Alt+1 armed us.
+DictationFinished(*) {
+    global Armed, ArmedPrev, DictationWait
+    if !Armed
+        return                        ; ordinary dictation — none of our business
+    Armed := false
+    Log("dictation finished — waiting " DictationWait "ms")
+    Sleep(DictationWait)              ; let it transcribe and type
     Submit()
-    GoBack(prev)
+    GoBack(ArmedPrev)
+}
+
+; Stop waiting if you pressed Alt+1 and then wandered off.
+Disarm() {
+    global Armed
+    if Armed {
+        Armed := false
+        Log("disarmed — no dictation within 30s")
+        TrayTip("Nothing dictated", "Is Handy running, and is its key right?", 2)
+    }
 }
 
 ; Snip a region of the screen and drop it into your AI chat.
@@ -146,9 +172,22 @@ Post(prev) {
 Submit() {
     global AutoSend
     if (AutoSend = "1") {
+        Log("submitting")
         Send("{Enter}")
         Sleep(80)
     }
+}
+
+; Install Handy, the free offline dictation app, via the Windows package
+; manager. Already installed? winget just tells you so and changes nothing.
+InstallHandy() {
+    if (MsgBox("Install Handy, the free offline dictation app?`n`n"
+             . "It's what powers the 'talk to my AI' key.",
+               "AI Snap", "OKCancel Iconi") != "OK")
+        return
+    Run('powershell.exe -NoProfile -NoExit -Command '
+      . '"winget install --id cjpais.Handy -e --accept-package-agreements '
+      . '--accept-source-agreements"')
 }
 
 ; Return to whatever the user was doing, if they asked us to.
