@@ -2,7 +2,7 @@
 *.exe
 
 # Debug log
-claudesnap.log
+ai-snap.log
 
 # Windows junk
 Thumbs.db
