@@ -16,15 +16,20 @@ SetTitleMatchMode(2)              ; allow partial window-title matches
 global Apps         := LoadApps()
 global Active       := IniRead(cfg, "Target",   "Active",         "Auto")
 global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
-global AutoPost     := IniRead(cfg, "Behavior", "AutoPostOnSnip", "0")
+global AutoSend     := IniRead(cfg, "Behavior", "AutoSend",       "1")
 global Debug        := IniRead(cfg, "Behavior", "Debug",          "0")
 
-keySnip := IniRead(cfg, "Hotkeys", "SnipAndSend",    "!1")
-keySel  := IniRead(cfg, "Hotkeys", "CopySelection",  "!2")
-keyAll  := IniRead(cfg, "Hotkeys", "CopyAllOnPage",  "!3")
+global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
+global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
+
+keyDict := IniRead(cfg, "Hotkeys", "Dictate",        "!1")
+keySnip := IniRead(cfg, "Hotkeys", "SnipAndSend",    "!2")
+keySel  := IniRead(cfg, "Hotkeys", "CopySelection",  "!3")
+keyAll  := IniRead(cfg, "Hotkeys", "CopyAllOnPage",  "!4")
 keyPost := IniRead(cfg, "Hotkeys", "Post",           "!0")
 
 ; --- bind the hotkeys -------------------------------------------------------
+Hotkey(keyDict, DictateToAI)
 Hotkey(keySnip, SnipAndSend)
 Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
@@ -42,15 +47,36 @@ A_TrayMenu.Add("Exit", (*) => ExitApp())
 A_IconTip := "AI Snap  —  sending to: " Active
 
 TrayTip("AI Snap is running",
-        "Snip: " keySnip "   Copy: " keySel "   All: " keyAll "   Send: " keyPost, 1)
+        "Talk: " keyDict "   Snip: " keySnip "   Copy: " keySel "   All: " keyAll, 1)
 
 ; ============================================================================
 ;  actions
 ; ============================================================================
 
+; Talk to your AI: focus the chat, wait while you dictate, then send.
+; Handy (or any dictation tool) types into whatever window has focus — so we
+; put the AI chat in front first, then let YOUR push-to-talk key do the talking.
+DictateToAI(*) {
+    global RestoreFocus, AutoSend, DictationKey, DictationWait
+    Log("Dictate fired")
+    prev := WinActive("A")
+    KeyWait("Alt", "T1")              ; never hold Alt near F4 — that's Alt+F4
+    if !FocusTarget()
+        return
+    if !KeyWait(DictationKey, "D T30") {          ; wait for you to start talking
+        TrayTip("Nothing dictated",
+                "Didn't see " DictationKey " within 30s. Is Handy running?", 2)
+        GoBack(prev)
+        return
+    }
+    KeyWait(DictationKey)                          ; ...and to stop
+    Sleep(DictationWait)                           ; let it transcribe and type
+    Submit()
+    GoBack(prev)
+}
+
 ; Snip a region of the screen and drop it into your AI chat.
 SnipAndSend(*) {
-    global RestoreFocus, AutoPost
     Log("Snip fired")
     prev := WinActive("A")
     KeyWait("Alt", "T1")              ; let go of Alt so the snip key isn't mangled
@@ -59,8 +85,6 @@ SnipAndSend(*) {
     if !ClipWait(60, 1)               ; wait up to 60s for the snip (1 = images too)
         return
     PasteIntoAI(prev, 200)
-    if (AutoPost = "1")
-        Post(prev)
 }
 
 ; Copy whatever text is highlighted right now, then send it.
@@ -98,25 +122,38 @@ GrabTextToAI(copyKeys) {
     PasteIntoAI(prev, 120)
 }
 
-; Focus the AI app, paste the clipboard, then hand focus back.
+; Focus the AI app, paste the clipboard, send it, then hand focus back.
 PasteIntoAI(prev, settle) {
-    global RestoreFocus
     if !FocusTarget()
         return
     Send("^v")
-    Sleep(settle)                     ; let it attach before we leave
-    if (RestoreFocus = "1" && prev)
-        WinActivate("ahk_id " prev)
+    Sleep(settle)                     ; let it attach before we send
+    Submit()
+    GoBack(prev)
 }
 
-; Focus the AI app, press Enter, then hand focus back.
+; Focus the AI app, press Enter, then hand focus back. (The manual send key.)
 Post(prev) {
-    global RestoreFocus
     KeyWait("Alt", "T1")
     if !FocusTarget()
         return
     Send("{Enter}")
     Sleep(80)
+    GoBack(prev)
+}
+
+; Press Enter — but only when auto-send is switched on.
+Submit() {
+    global AutoSend
+    if (AutoSend = "1") {
+        Send("{Enter}")
+        Sleep(80)
+    }
+}
+
+; Return to whatever the user was doing, if they asked us to.
+GoBack(prev) {
+    global RestoreFocus
     if (RestoreFocus = "1" && prev)
         WinActivate("ahk_id " prev)
 }
@@ -244,19 +281,25 @@ ShowSettings(*) {
 
     g.Add("Text", "xm y+16", "Click a box, then press the keys you'd like to use:")
 
-    g.Add("Text",   "xm y+14 w190",       "Snip screenshot → AI")
-    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "SnipAndSend",   "!1"))
+    g.Add("Text",   "xm y+14 w190",       "Talk to my AI (dictation)")
+    hkDict := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "Dictate",       "!1"))
+    g.Add("Text",   "xm y+10 w190",       "Snip screenshot → AI")
+    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "SnipAndSend",   "!2"))
     g.Add("Text",   "xm y+10 w190",       "Copy highlighted → AI")
-    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopySelection", "!2"))
+    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopySelection", "!3"))
     g.Add("Text",   "xm y+10 w190",       "Select-all page → AI")
-    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!3"))
-    g.Add("Text",   "xm y+10 w190",       "Send / post message")
+    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!4"))
+    g.Add("Text",   "xm y+10 w190",       "Send manually")
     hkPost := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "Post",          "!0"))
 
-    cbRestore := g.Add("Checkbox", "xm y+16", "Return to my window after each action")
-    cbRestore.Value := (IniRead(cfg, "Behavior", "RestoreFocus",   "1") = "1")
-    cbAuto := g.Add("Checkbox", "xm y+8", "Send screenshot the moment I finish snipping")
-    cbAuto.Value := (IniRead(cfg, "Behavior", "AutoPostOnSnip", "0") = "1")
+    g.Add("Text", "xm y+14 w190", "My dictation push-to-talk key")
+    edDictKey := g.Add("Edit", "x+6 yp-4 w60", IniRead(cfg, "Dictation", "Key", "F4"))
+    g.Add("Text", "x+10 yp+4", "(as set in Handy)")
+
+    cbAuto := g.Add("Checkbox", "xm y+16", "Send to the AI automatically every time")
+    cbAuto.Value := (IniRead(cfg, "Behavior", "AutoSend", "1") = "1")
+    cbRestore := g.Add("Checkbox", "xm y+8", "Return to my window after each action")
+    cbRestore.Value := (IniRead(cfg, "Behavior", "RestoreFocus", "1") = "1")
 
     g.Add("Button", "xm y+18 w120 Default", "Save && Reload").OnEvent("Click", Save)
     g.Add("Button", "x+10 w90", "Cancel").OnEvent("Click", (*) => g.Destroy())
@@ -264,20 +307,26 @@ ShowSettings(*) {
     g.Show()
 
     Save(*) {
-        for hk in [hkSnip, hkSel, hkAll, hkPost] {
+        for hk in [hkDict, hkSnip, hkSel, hkAll, hkPost] {
             if (hk.Value = "") {
                 MsgBox("Every box needs a key combo.", "AI Snap", "Iconx 4096")
                 return
             }
         }
+        if (Trim(edDictKey.Value) = "") {
+            MsgBox("Which key does your dictation app use?", "AI Snap", "Iconx 4096")
+            return
+        }
         pick := ddTarget.Value                  ; 1 = Auto, else Apps[pick-1]
         IniWrite(pick = 1 ? "Auto" : Apps[pick - 1].name, cfg, "Target", "Active")
+        IniWrite(hkDict.Value, cfg, "Hotkeys", "Dictate")
         IniWrite(hkSnip.Value, cfg, "Hotkeys", "SnipAndSend")
         IniWrite(hkSel.Value,  cfg, "Hotkeys", "CopySelection")
         IniWrite(hkAll.Value,  cfg, "Hotkeys", "CopyAllOnPage")
         IniWrite(hkPost.Value, cfg, "Hotkeys", "Post")
+        IniWrite(Trim(edDictKey.Value), cfg, "Dictation", "Key")
+        IniWrite(cbAuto.Value    ? "1" : "0", cfg, "Behavior", "AutoSend")
         IniWrite(cbRestore.Value ? "1" : "0", cfg, "Behavior", "RestoreFocus")
-        IniWrite(cbAuto.Value    ? "1" : "0", cfg, "Behavior", "AutoPostOnSnip")
         g.Destroy()
         Reload()                                ; restart with the new settings
     }
