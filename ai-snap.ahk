@@ -28,7 +28,7 @@ global Comp      := 0     ; the composer window while it's open, 0 when it isn't
 global CompItems := []    ; what's attached so far: [{label, data, wait}]
 global CompPrev  := 0     ; the window to hand focus back to when we're done
 global CompNote  := ""    ; your typed note, kept while the box is put away
-global CompEdit  := 0, CompList := 0
+global CompEdit  := 0, CompHead := 0
 
 global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
 global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
@@ -45,6 +45,10 @@ Hotkey(keySnip, SnipAndSend)
 Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
+
+; The little bot, instead of AutoHotkey's H. Missing icon isn't worth dying over.
+try TraySetIcon(A_ScriptDir "\ai-snap.ico")
+OnMessage(0x201, DragCard)                  ; 0x201 = left mouse button down
 
 ; Enter sends from the composer box (Shift+Enter still makes a new line).
 ; Registered once, and only ever live while that window is the active one.
@@ -337,17 +341,20 @@ Log(msg) {
 global ThemeNames := ["Claude Code", "Codex", "Gemini"]
 
 ; bg     = window     panel  = boxes and quiet buttons   accent = the Send button
-; text   = writing    dim    = little grey hints         font   = typeface
+; text   = writing    dim    = little grey hints         hot    = under the mouse
 Themes() {
     return Map(
-      "Claude Code", { bg: "262624", panel: "3A3A37", text: "F5F4EF",
+      "Claude Code", { bg: "262624", panel: "36352F", text: "F5F4EF",
                        dim: "A6A299", accent: "D97757", accentText: "FFFFFF",
+                       panelHot: "45443C", accentHot: "E68A6C",
                        font: "Segoe UI" },
-      "Codex",       { bg: "0D0D0D", panel: "1F1F1F", text: "ECECEC",
+      "Codex",       { bg: "0D0D0D", panel: "1C1C1C", text: "ECECEC",
                        dim: "8E8E8E", accent: "10A37F", accentText: "FFFFFF",
+                       panelHot: "2A2A2A", accentHot: "17B892",
                        font: "Consolas" },
-      "Gemini",      { bg: "1E1F20", panel: "2E2F31", text: "E3E3E3",
+      "Gemini",      { bg: "1B1C1D", panel: "2B2C2E", text: "E3E3E3",
                        dim: "9AA0A6", accent: "8AB4F8", accentText: "202124",
+                       panelHot: "3A3B3E", accentHot: "A8C7FA",
                        font: "Google Sans" })   ; falls back to your system font
 }
 
@@ -358,23 +365,80 @@ ThemeNow() {
     return t.Has(Theme) ? t[Theme] : t["Claude Code"]
 }
 
-; Dress a window: dark background, dark title bar, themed default font.
+; Dress a window: dark background, rounded corners, themed default font.
 ApplyTheme(g, t) {
     g.BackColor := t.bg
     g.SetFont("s10 c" t.text, t.font)
-    ; ask Windows for a dark title bar (20 = DWMWA_USE_IMMERSIVE_DARK_MODE)
+    ; 20 = dark title bar (for windows that still have one)
     try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 20,
                 "int*", 1, "int", 4)
+    ; 33 = corner preference, 2 = rounded (Windows 11 rounds the whole card)
+    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 33,
+                "int*", 2, "int", 4)
 }
 
-; A flat coloured button. Real Windows buttons ignore colour, so this is a
-; Text control that behaves like one (+0x200 centres the label vertically).
+; Round off a control by clipping it to a rounded rectangle. Windows controls
+; are square by nature, so this is what stops everything looking like 1998.
+Round(ctrl, radius) {
+    rc := Buffer(16)
+    DllCall("GetClientRect", "ptr", ctrl.Hwnd, "ptr", rc)
+    rgn := DllCall("CreateRoundRectRgn", "int", 0, "int", 0,
+                   "int", NumGet(rc, 8, "int") + 1, "int", NumGet(rc, 12, "int") + 1,
+                   "int", radius * 2, "int", radius * 2, "ptr")
+    DllCall("SetWindowRgn", "ptr", ctrl.Hwnd, "ptr", rgn, "int", true)
+}
+
+; A flat, rounded, coloured button. Real Windows buttons ignore colour, so this
+; is a Text control that behaves like one:
+;   +0x200 centres the label vertically   +0x80 stops "&" underlining a letter
 ThemeButton(g, t, label, opts, cb, primary := false) {
-    b := g.Add("Text", opts " Center +0x200 Background"
-             . (primary ? t.accent : t.panel)
+    bg  := primary ? t.accent     : t.panel
+    hot := primary ? t.accentHot  : t.panelHot
+    b := g.Add("Text", opts " Center +0x200 +0x80 Background" bg
              . " c" (primary ? t.accentText : t.text), label)
     b.OnEvent("Click", cb)
+    Round(b, 8)
+    Hover(b, bg, hot)
     return b
+}
+
+; ---- hover ------------------------------------------------------------------
+; Static controls have no hover event, so one cheap timer watches what the
+; mouse is over and recolours only when it moves onto something new.
+global HoverBtns := [], HoverAt := 0
+
+; NB: don't call that first colour "base" — in an object literal that word sets
+; the prototype, and you get "Invalid base" instead of a button.
+; Keep the raw hwnd: once a window is destroyed, asking the control object for
+; its .Hwnd throws, so that number is the only safe way to check it's still there.
+Hover(ctrl, cold, hot) {
+    global HoverBtns
+    HoverBtns.Push({ ctrl: ctrl, hwnd: ctrl.Hwnd, cold: cold, hot: hot })
+    SetTimer(HoverCheck, 70)
+}
+
+HoverCheck() {
+    global HoverBtns, HoverAt
+    live := []
+    for b in HoverBtns                    ; forget buttons whose window has gone
+        if DllCall("IsWindow", "ptr", b.hwnd)
+            live.Push(b)
+    HoverBtns := live
+    if !live.Length {                     ; nothing left to watch — stop ticking
+        SetTimer(HoverCheck, 0)
+        HoverAt := 0
+        return
+    }
+    MouseGetPos(, , , &under, 2)          ; 2 = give me the control's hwnd
+    if (under = HoverAt)
+        return
+    HoverAt := under
+    for b in live {
+        try {
+            b.ctrl.Opt("Background" (under = b.hwnd ? b.hot : b.cold))
+            b.ctrl.Redraw()
+        }
+    }
 }
 
 ; ============================================================================
@@ -389,72 +453,105 @@ ThemeButton(g, t, label, opts, cb, primary := false) {
 ; bring the box up. ClipboardAll() keeps the *whole* clipboard — an image stays
 ; an image — so pasting it later is identical to pasting it now.
 Attach(label, prev, wait) {
-    global CompItems
+    global Comp, CompItems
     CompItems.Push({ label: label, data: ClipboardAll(), wait: wait })
     Log("attached: " label)
     UpdateTrayTip()
-    ShowComposer(prev)
+    if Comp
+        RebuildComposer()             ; already open — redraw it with the new chip
+    else
+        ShowComposer(prev)
+}
+
+; There's no title bar to grab, so dragging the heading moves the card.
+; 0xA1 = "act like the mouse went down on the caption", 2 = the caption.
+DragCard(wParam, lParam, msg, hwnd) {
+    global Comp, CompHead
+    if (Comp && CompHead && hwnd = CompHead.Hwnd)
+        PostMessage(0xA1, 2, 0, , "ahk_id " Comp.Hwnd)
 }
 
 ; Open the box, or just bring it back to the front if it's already open.
-; Anything stored earlier is still in there — list and note both.
+; Anything stored earlier is still in there — the grabs and your note both.
+; No title bar: it's a plain rounded card you drag by its heading.
 ShowComposer(prev) {
-    global Comp, CompItems, CompPrev, CompNote, CompEdit, CompList
+    global Comp, CompItems, CompPrev, CompNote, CompEdit, CompHead
     if Comp {
         Comp.Show()
-        RefreshAttachments()
         return
     }
     CompPrev := prev
     t := ThemeNow()
-    Comp := g := Gui("+AlwaysOnTop +ToolWindow -MinimizeBox", "Send to AI")
+    Comp := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "Send to AI")
+    g.MarginX := 18, g.MarginY := 16
     ApplyTheme(g, t)
 
-    g.Add("Text", "xm ym", "Going to your AI:")
-    CompList := g.Add("ListBox", "xm y+6 w418 r4 Background" t.panel " c" t.text)
-    ThemeButton(g, t, "Remove", "xm y+8 w100 h28", RemoveAttachment)
-    g.SetFont("s9 c" t.dim)
-    g.Add("Text", "x+12 yp+5 w300", "Grab more any time — it all stacks up.")
+    g.SetFont("s11 w600 c" t.text)
+    CompHead := g.Add("Text", "xm ym w360 +0x100", "Send to AI")   ; 0x100 = clickable
+    g.SetFont("s12 c" t.dim)
+    g.Add("Text", "x+0 yp-2 w32 h28 Center +0x200 +0x100 Background" t.bg, "✕")
+        .OnEvent("Click", StoreComposer)
 
-    g.SetFont("s10 c" t.text)
-    g.Add("Text", "xm y+16", "Add a note:")
+    ; --- what you've grabbed, one rounded chip each ---
     g.SetFont("s9 c" t.dim)
-    g.Add("Text", "x+10 yp+3", "Enter sends  ·  Shift+Enter = new line")
+    if !CompItems.Length
+        g.Add("Text", "xm y+14 w392", "Nothing grabbed yet.")
     g.SetFont("s10 c" t.text)
-    CompEdit := g.Add("Edit", "xm y+6 w418 r5 +Multi +WantReturn Background"
-                            . t.panel " c" t.text)
+    for i, it in CompItems {
+        chip := g.Add("Text", (i = 1 ? "xm y+12" : "xm y+8")
+                    . " w352 h36 +0x200 +0x80 +0x4000 Background" t.panel
+                    . " c" t.text, "  " it.label)
+        Round(chip, 10)
+        x := g.Add("Text", "x+8 yp w32 h36 Center +0x200 Background" t.panel
+                         . " c" t.dim, "✕")
+        x.OnEvent("Click", Remover(i))          ; drop just this one
+        Round(x, 10)
+        Hover(x, t.panel, t.panelHot)
+    }
+
+    ; --- your note ---
+    g.SetFont("s9 c" t.dim)
+    g.Add("Text", "xm y+16 w392", "Add a note  ·  Enter sends  ·  Shift+Enter = new line")
+    g.SetFont("s10 c" t.text)
+    CompEdit := g.Add("Edit", "xm y+8 w392 h108 -E0x200 -VScroll +Multi +WantReturn"
+                            . " Background" t.panel " c" t.text)
     CompEdit.Value := CompNote                  ; whatever you'd typed before
+    Round(CompEdit, 10)
 
-    ThemeButton(g, t, "Send",   "xm y+14 w134 h34", ComposerSend, true)
-    ThemeButton(g, t, "Store",  "x+8 w134 h34",     StoreComposer)
-    ThemeButton(g, t, "Cancel", "x+8 w134 h34",     CancelComposer)
-    g.SetFont("s9 c" t.dim)
-    g.Add("Text", "xm y+8 w418", "Store puts it away and keeps everything — "
-                               . "your next grab opens it back up.")
+    ThemeButton(g, t, "Send",   "xm y+16 w124 h40", ComposerSend, true)
+    ThemeButton(g, t, "Store",  "x+10 w124 h40",    StoreComposer)
+    ThemeButton(g, t, "Cancel", "x+10 w124 h40",    CancelComposer)
 
     g.OnEvent("Escape", StoreComposer)           ; Esc never loses your stuff
     g.OnEvent("Close",  StoreComposer)
 
-    RefreshAttachments()
     g.Show()
     CompEdit.Focus()                  ; land in the note box, ready to type
 }
 
-; Redraw the list of what's attached.
-RefreshAttachments() {
-    global CompItems, CompList
-    CompList.Delete()
-    for i, it in CompItems
-        CompList.Add([i ". " it.label])
+; Adding or dropping a grab changes how tall the card is, so the simplest
+; thing that works is to build it again — your note comes along with it.
+RebuildComposer() {
+    global Comp, CompPrev, CompNote, CompEdit
+    if !Comp
+        return
+    CompNote := CompEdit.Value
+    prev := CompPrev
+    Comp.Destroy()
+    Comp := 0
+    ShowComposer(prev)
 }
 
-; Drop something you didn't mean to grab.
-RemoveAttachment(*) {
-    global CompItems, CompList, CompEdit
-    if (i := CompList.Value)
+; One remover per chip. It's a function so each ✕ keeps its own number —
+; a closure made inside the loop would share the last one.
+Remover(i) => (*) => RemoveAttachment(i)
+
+RemoveAttachment(i) {
+    global CompItems
+    if (i <= CompItems.Length)
         CompItems.RemoveAt(i)
-    RefreshAttachments()
-    CompEdit.Focus()
+    UpdateTrayTip()
+    RebuildComposer()
 }
 
 ; Send the lot: each attachment in the order you grabbed it, then your note,
@@ -551,14 +648,14 @@ ShowSettings(*) {
     names := ["Auto — whichever app I used last"]
     for a in Apps
         names.Push(a.name)
-    ddTarget := g.Add("DropDownList", "x+6 yp-4 w240 Background" t.panel " c" t.text, names)
+    ddTarget := g.Add("DropDownList", "x+6 yp-4 w240 -E0x200 Background" t.panel " c" t.text, names)
     ddTarget.Choose(1)
     for i, a in Apps
         if (a.name = Active)
             ddTarget.Choose(i + 1)
 
     g.Add("Text", "xm y+10", "Look:")
-    ddTheme := g.Add("DropDownList", "x+6 yp-4 w240 Background" t.panel " c" t.text,
+    ddTheme := g.Add("DropDownList", "x+6 yp-4 w240 -E0x200 Background" t.panel " c" t.text,
                      ThemeNames)
     ddTheme.Choose(1)
     for i, n in ThemeNames
@@ -568,18 +665,18 @@ ShowSettings(*) {
     g.Add("Text", "xm y+16", "Click a box, then press the keys you'd like to use:")
 
     g.Add("Text",   "xm y+14 w190",       "Talk to my AI (dictation)")
-    hkDict := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "Dictate",       "!1"))
+    hkDict := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "Dictate",       "!1"))
     g.Add("Text",   "xm y+10 w190",       "Snip screenshot → AI")
-    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "SnipAndSend",   "!2"))
+    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "SnipAndSend",   "!2"))
     g.Add("Text",   "xm y+10 w190",       "Copy highlighted → AI")
-    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "CopySelection", "!3"))
+    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "CopySelection", "!3"))
     g.Add("Text",   "xm y+10 w190",       "Select-all page → AI")
-    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!4"))
+    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!4"))
     g.Add("Text",   "xm y+10 w190",       "Send manually")
-    hkPost := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "Post",          "!0"))
+    hkPost := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "Post",          "!0"))
 
     g.Add("Text", "xm y+14 w190", "My dictation push-to-talk key")
-    edDictKey := g.Add("Edit", "x+6 yp-4 w60 Background" t.panel " c" t.text,
+    edDictKey := g.Add("Edit", "x+6 yp-4 w60 h26 -E0x200 Background" t.panel " c" t.text,
                        IniRead(cfg, "Dictation", "Key", "F4"))
     g.SetFont("s9 c" t.dim)
     g.Add("Text", "x+10 yp+4", "(as set in Handy)")
@@ -592,9 +689,12 @@ ShowSettings(*) {
     cbRestore := g.Add("Checkbox", "xm y+8", "Return to my window after each action")
     cbRestore.Value := (IniRead(cfg, "Behavior", "RestoreFocus", "1") = "1")
 
-    ThemeButton(g, t, "Save and reload", "xm y+18 w150 h34", Save, true)
-    ThemeButton(g, t, "Cancel", "x+8 w110 h34", (*) => g.Destroy())
+    ThemeButton(g, t, "Save and reload", "xm y+18 w160 h38", Save, true)
+    ThemeButton(g, t, "Cancel", "x+10 w120 h38", (*) => g.Destroy())
     g.OnEvent("Escape", (*) => g.Destroy())
+
+    for c in [ddTarget, ddTheme, hkDict, hkSnip, hkSel, hkAll, hkPost, edDictKey]
+        Round(c, 6)
     g.Show()
 
     Save(*) {
