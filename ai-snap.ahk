@@ -18,6 +18,8 @@ global Apps         := LoadApps()
 global Active       := IniRead(cfg, "Target",   "Active",         "Auto")
 global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
 global AutoSend     := IniRead(cfg, "Behavior", "AutoSend",       "1")
+global Composer     := IniRead(cfg, "Behavior", "Composer",       "1")
+global AttachWait   := IniRead(cfg, "Behavior", "AttachWait",     "400")
 global Debug        := IniRead(cfg, "Behavior", "Debug",          "0")
 
 global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
@@ -35,6 +37,12 @@ Hotkey(keySnip, SnipAndSend)
 Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
+
+; Enter sends from the composer box (Shift+Enter still makes a new line).
+; Registered once, and only ever live while that window is the active one.
+HotIfWinActive("Send to AI ahk_class AutoHotkeyGUI")
+Hotkey("Enter", ComposerSend)
+HotIf()
 
 ; Watch for your dictation key being released. The "~" means we only listen —
 ; the keystroke still reaches Handy exactly as normal.
@@ -103,26 +111,36 @@ Disarm() {
 
 ; Snip a region of the screen and drop it into your AI chat.
 SnipAndSend(*) {
+    global Comp, CompPrev, Composer, AttachWait
     Log("Snip fired")
-    prev := WinActive("A")
+    prev := Comp ? CompPrev : WinActive("A")
+    if Comp
+        Comp.Hide()                   ; keep the composer out of your own screenshot
     KeyWait("Alt", "T1")              ; let go of Alt so the snip key isn't mangled
     A_Clipboard := ""                 ; clear so we can detect the new snip
     Send("#+s")                       ; Windows built-in "snip region to clipboard"
-    if !ClipWait(60, 1)               ; wait up to 60s for the snip (1 = images too)
+    if !ClipWait(60, 1) {             ; wait up to 60s for the snip (1 = images too)
+        if Comp
+            ShowComposer(prev)        ; snip cancelled — put the box back
         return
-    PasteIntoAI(prev, 200)
+    }
+    if (Composer = "1") {
+        Attach("Screenshot", prev, AttachWait)
+        return
+    }
+    PasteIntoAI(prev, AttachWait)
 }
 
 ; Copy whatever text is highlighted right now, then send it.
 CopySelectionToAI(*) {
     Log("CopySelection fired")
-    GrabTextToAI("^c")
+    GrabTextToAI("^c", "Text")
 }
 
 ; Select everything on the page, copy it, then send it.
 CopyAllToAI(*) {
     Log("CopyAll fired")
-    GrabTextToAI("^a^c")
+    GrabTextToAI("^a^c", "Whole page")
 }
 
 ; Send / post the current message.
@@ -136,13 +154,18 @@ PostToAI(*) {
 ; ============================================================================
 
 ; Copy from the window you're in (using copyKeys), then paste into the AI app.
-GrabTextToAI(copyKeys) {
-    prev := WinActive("A")
+GrabTextToAI(copyKeys, label) {
+    global Comp, CompPrev, Composer
+    prev := Comp ? CompPrev : WinActive("A")
     KeyWait("Alt", "T1")              ; release Alt or ^c becomes ^!c and fails
     A_Clipboard := ""                 ; clear so we know when the copy lands
     Send(copyKeys)                    ; the copy happens in YOUR window
     if !ClipWait(2) {                 ; wait up to 2s for text
         TrayTip("Nothing copied", "No text was selected to send.", 2)
+        return
+    }
+    if (Composer = "1") {
+        Attach(label ": " Preview(A_Clipboard), prev, 120)
         return
     }
     PasteIntoAI(prev, 120)
@@ -301,6 +324,129 @@ Log(msg) {
 }
 
 ; ============================================================================
+;  the composer — a little box that holds everything you've grabbed so you can
+;  type a note before it goes. Snips, highlighted text, whole pages: they all
+;  stack up in here, in order, and go across in one message when you hit Send.
+;
+;  It's a plain AutoHotkey window, so it works no matter which program you
+;  grabbed from — nothing is added to the app you're in.
+; ============================================================================
+global Comp      := 0     ; the composer window while it's open, 0 when it isn't
+global CompItems := []    ; what's attached so far: [{label, data, wait}]
+global CompPrev  := 0     ; the window to hand focus back to when we're done
+global CompEdit  := 0, CompList := 0
+
+; Take whatever is on the clipboard right now, park it in the composer, and
+; bring the box up. ClipboardAll() keeps the *whole* clipboard — an image stays
+; an image — so pasting it later is identical to pasting it now.
+Attach(label, prev, wait) {
+    global CompItems
+    CompItems.Push({ label: label, data: ClipboardAll(), wait: wait })
+    Log("attached: " label)
+    ShowComposer(prev)
+}
+
+; Open the box, or just bring it back to the front if it's already open.
+ShowComposer(prev) {
+    global Comp, CompItems, CompPrev, CompEdit, CompList
+    if Comp {
+        Comp.Show()
+        RefreshAttachments()
+        return
+    }
+    CompPrev := prev
+    Comp := g := Gui("+AlwaysOnTop +ToolWindow -MinimizeBox", "Send to AI")
+    g.SetFont("s10", "Segoe UI")
+
+    g.Add("Text", "xm", "Going to your AI:")
+    CompList := g.Add("ListBox", "xm y+4 w380 r4")
+    g.Add("Button", "xm y+4 w130", "Remove selected").OnEvent("Click", RemoveAttachment)
+    g.Add("Text", "x+10 yp+5 w240 cGray", "Grab more any time — it all stacks up.")
+
+    g.Add("Text", "xm y+12", "Add a note (Enter sends  ·  Shift+Enter = new line):")
+    CompEdit := g.Add("Edit", "xm y+4 w380 r5 +Multi +WantReturn")
+
+    g.Add("Button", "xm y+12 w130", "Send").OnEvent("Click", ComposerSend)
+    g.Add("Button", "x+10 w90", "Cancel").OnEvent("Click", CancelComposer)
+    g.OnEvent("Escape", CancelComposer)
+    g.OnEvent("Close",  CancelComposer)
+
+    RefreshAttachments()
+    g.Show()
+    CompEdit.Focus()                  ; land in the note box, ready to type
+}
+
+; Redraw the list of what's attached.
+RefreshAttachments() {
+    global CompItems, CompList
+    CompList.Delete()
+    for i, it in CompItems
+        CompList.Add([i ". " it.label])
+}
+
+; Drop something you didn't mean to grab.
+RemoveAttachment(*) {
+    global CompItems, CompList, CompEdit
+    if (i := CompList.Value)
+        CompItems.RemoveAt(i)
+    RefreshAttachments()
+    CompEdit.Focus()
+}
+
+; Send the lot: each attachment in the order you grabbed it, then your note,
+; then Enter. Restoring each saved clipboard and pasting is what lets one
+; message carry an image, some copied text and your own typing together.
+ComposerSend(*) {
+    global Comp, CompItems, CompPrev, CompEdit
+    if !Comp
+        return
+    note  := CompEdit.Value
+    items := CompItems
+    prev  := CompPrev
+    CloseComposer()                   ; get our window out of the way first
+    if (!items.Length && Trim(note) = "")
+        return
+    if !FocusTarget()
+        return
+    for it in items {
+        A_Clipboard := it.data        ; put that exact grab back on the clipboard
+        Sleep(60)
+        Send("^v")
+        Sleep(it.wait)                ; images especially need a moment to attach
+    }
+    if (Trim(note) != "") {
+        A_Clipboard := note
+        ClipWait(2)
+        Send("^v")
+        Sleep(120)
+    }
+    Send("{Enter}")                   ; you clicked Send, so we always send
+    Sleep(80)
+    GoBack(prev)
+}
+
+CancelComposer(*) {
+    global CompPrev
+    prev := CompPrev
+    Log("composer cancelled")
+    CloseComposer()
+    GoBack(prev)
+}
+
+CloseComposer() {
+    global Comp, CompItems, CompPrev
+    if Comp
+        Comp.Destroy()
+    Comp := 0, CompItems := [], CompPrev := 0
+}
+
+; Squash text down to one short line so it reads nicely in the list.
+Preview(t) {
+    t := RegExReplace(Trim(t), "\s+", " ")
+    return StrLen(t) > 45 ? SubStr(t, 1, 45) "…" : t
+}
+
+; ============================================================================
 ;  settings window — click a box, press the keys you want, Save.
 ; ============================================================================
 ShowSettings(*) {
@@ -335,7 +481,9 @@ ShowSettings(*) {
     edDictKey := g.Add("Edit", "x+6 yp-4 w60", IniRead(cfg, "Dictation", "Key", "F4"))
     g.Add("Text", "x+10 yp+4", "(as set in Handy)")
 
-    cbAuto := g.Add("Checkbox", "xm y+16", "Send to the AI automatically every time")
+    cbComp := g.Add("Checkbox", "xm y+16", "Open the composer so I can add a note first")
+    cbComp.Value := (IniRead(cfg, "Behavior", "Composer", "1") = "1")
+    cbAuto := g.Add("Checkbox", "xm y+8", "Send to the AI automatically every time")
     cbAuto.Value := (IniRead(cfg, "Behavior", "AutoSend", "1") = "1")
     cbRestore := g.Add("Checkbox", "xm y+8", "Return to my window after each action")
     cbRestore.Value := (IniRead(cfg, "Behavior", "RestoreFocus", "1") = "1")
@@ -364,6 +512,7 @@ ShowSettings(*) {
         IniWrite(hkAll.Value,  cfg, "Hotkeys", "CopyAllOnPage")
         IniWrite(hkPost.Value, cfg, "Hotkeys", "Post")
         IniWrite(Trim(edDictKey.Value), cfg, "Dictation", "Key")
+        IniWrite(cbComp.Value    ? "1" : "0", cfg, "Behavior", "Composer")
         IniWrite(cbAuto.Value    ? "1" : "0", cfg, "Behavior", "AutoSend")
         IniWrite(cbRestore.Value ? "1" : "0", cfg, "Behavior", "RestoreFocus")
         g.Destroy()
