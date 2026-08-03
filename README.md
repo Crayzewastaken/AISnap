@@ -22,6 +22,22 @@ By default it sends to **whichever supported app you used most recently**, so yo
 
 ---
 
+## What's new
+
+- **A composer box.** Snip or copy and a little window pops up. Type a note, hit Enter, and it lands in your AI chat as one message.
+- **Stack things up.** Keep snipping and copying while it's open — a screenshot, a paragraph, another screenshot. It all goes across together, in order.
+- **Store button.** Not ready to send? Hit Store. It closes and keeps everything, including what you'd half-typed. Snip something two minutes later and it opens back up with your first grab still sitting there. Build a message over as long as you like, then send once.
+- **Send / Store / Cancel** — send it, park it, or bin it. The tray tooltip tells you how many are waiting.
+- **Drop a bad grab** with the ✕ next to it.
+- **Enter** sends · **Shift+Enter** new line · **Esc** stores, so you can't lose a message by tapping it.
+- **Three themes** — Claude Code (default), Codex, Gemini. Settings → *Look*.
+- **Modern look.** Frameless rounded card, rounded buttons that light up under the mouse, no 90s grey dialog. Drag it by the heading.
+- **New tray icon** — a little bot instead of AutoHotkey's green H.
+- **Works in any program.** It's AI Snap's own window, so Word, Chrome, a PDF, a game, your email — all the same. It hides itself while you drag a snip so it never lands in your own screenshot.
+- **Don't want the box?** Settings → untick it, and every key fires straight through like before.
+
+---
+
 ## Install (2 minutes)
 
 1. **Install AutoHotkey v2** (free, tiny) → https://www.autohotkey.com/ → click *Download v2*.
