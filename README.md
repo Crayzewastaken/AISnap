@@ -10,7 +10,9 @@ Talk to your AI, snip a piece of your screen, or send the text you've highlighte
 - **Alt + 4** → **selects everything** on the page and sends it.
 - **Alt + 0** → send by hand (only needed if you turn auto-send off).
 
-**Everything sends itself.** By default each of these drops the content in *and hits Enter*, so you're done in one keypress. Prefer to add a note before it goes? Untick *"Send to the AI automatically every time"* in Settings and use **Alt + 0** when you're ready.
+**Say something about it first.** When you snip or copy, a small **Send to AI** box pops up. Type whatever you want to say, grab more bits while you're at it — another screenshot, more highlighted text — and it all goes across in **one message** when you hit Enter. See [The composer box](#the-composer-box).
+
+Want it to just fire straight through with no box? Untick *"Open the composer so I can add a note first"* in Settings — then each key drops the content in *and hits Enter* on its own.
 
 You stay on your own screen the whole time — AI Snap flicks over to the AI app, drops the content, and flicks back. Every key is yours to change (see [Customising](#customising)).
 
@@ -41,7 +43,22 @@ That's it. A small green **H** icon appears in your system tray (bottom-right, n
 | Send everything on the page (select-all) | **Alt + 4** |
 | Send by hand (if auto-send is off) | **Alt + 0** |
 
-Typical flow: highlight some text → **Alt+3**. That's it — it's already sent. Or **Alt+2**, drag a box, done. Never leaving your work.
+Typical flow: highlight some text → **Alt+3** → type what you want to ask about it → **Enter**. Or **Alt+2**, drag a box, say your piece, Enter. Never leaving your work.
+
+---
+
+## The composer box
+
+Snip or copy anything and this little box appears:
+
+- **Type a note** — it gets sent underneath whatever you grabbed.
+- **Keep grabbing** — press **Alt+2**, **Alt+3** or **Alt+4** again while it's open and the new bit joins the list. A screenshot, a paragraph you copied and your own question all arrive as **one message**.
+- Grabbed the wrong thing? Click it in the list → **Remove selected**.
+- **Enter** sends. **Shift+Enter** starts a new line. **Esc** throws it all away.
+
+It's AI Snap's own window, so it works the same whether you grabbed from Word, a browser, a PDF, a game or your email — nothing is added to the program you're in, and the box hides itself while you're dragging a snip so it never ends up in your own screenshot.
+
+Don't want it? Settings → untick *"Open the composer so I can add a note first"*.
 
 ---
 
@@ -121,7 +138,7 @@ If you'd rather not install AutoHotkey on every machine, right-click `ai-snap.ah
 - **It sends to the wrong app** — open Settings and pin the one you want in the **Send to** dropdown instead of leaving it on Auto.
 - **"Nothing dictated"** — AI Snap waited 30s and never saw your push-to-talk key. Check Handy is running, and that the key in Settings matches Handy's.
 - **Dictation sends half a sentence** — raise `Wait` under `[Dictation]` in `config.ini`.
-- **The screenshot doesn't paste** — some apps are slow to attach the image. If a snip fails, just press the key again.
+- **The screenshot doesn't paste** — some apps are slow to attach the image. Raise `AttachWait` under `[Behavior]` in `config.ini` (400 ms by default), or just press the key again.
 - **Quick flicker to the AI app and back** — that's expected. Windows won't let one app type into another without briefly focusing it; AI Snap does that in a blink and returns you. Untick *"Return to my window"* if you'd rather it stay.
 - **Still nothing?** Set `Debug = 1` in `config.ini` and Reload. An `ai-snap.log` appears next to the script showing what fired.
 
