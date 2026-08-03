@@ -53,7 +53,8 @@ Snip or copy anything and this little box appears:
 
 - **Type a note** — it gets sent underneath whatever you grabbed.
 - **Keep grabbing** — press **Alt+2**, **Alt+3** or **Alt+4** again while it's open and the new bit joins the list. A screenshot, a paragraph you copied and your own question all arrive as **one message**.
-- Grabbed the wrong thing? Click it in the list → **Remove**.
+- Grabbed the wrong thing? Click the **✕** next to it.
+- Drag it around by its heading — it has no title bar, it's just a card.
 
 Three buttons:
 

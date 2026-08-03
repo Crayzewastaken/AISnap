@@ -35,8 +35,7 @@ A_Clipboard := CompItems[1].data
 ClipWait(2)
 Check(A_Clipboard = "hello world",                     "saved grab round-trips")
 
-CompList.Choose(1)
-RemoveAttachment()
+RemoveAttachment(1)
 Check(CompItems.Length = 1,                            "remove drops one")
 Check(CompItems[1].label = "Text: second grab",        "remove drops the right one")
 
@@ -50,7 +49,12 @@ Check(CompNote = "half-written note",                  "store keeps the note")
 ShowComposer(0)
 Check(Comp != 0,                                       "next grab reopens it")
 Check(CompEdit.Value = "half-written note",            "the note comes back")
-Check(CompList.Text = "",                              "nothing is selected on reopen")
+
+; each chip's ✕ must drop its own item, not whatever was selected last
+Attach("Third", 0, 120)
+Check(CompItems.Length = 2,                            "attach while open stacks up")
+Remover(1)()                                           ; the first chip's ✕
+Check(CompItems.Length = 1 && CompItems[1].label = "Third", "the right chip goes")
 
 for name in ThemeNames {
     Theme := name
