@@ -19,8 +19,16 @@ global Active       := IniRead(cfg, "Target",   "Active",         "Auto")
 global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
 global AutoSend     := IniRead(cfg, "Behavior", "AutoSend",       "1")
 global Composer     := IniRead(cfg, "Behavior", "Composer",       "1")
+global Theme        := IniRead(cfg, "Look",     "Theme",          "Claude Code")
 global AttachWait   := IniRead(cfg, "Behavior", "AttachWait",     "400")
 global Debug        := IniRead(cfg, "Behavior", "Debug",          "0")
+
+; --- the composer's state (see the composer section further down) -----------
+global Comp      := 0     ; the composer window while it's open, 0 when it isn't
+global CompItems := []    ; what's attached so far: [{label, data, wait}]
+global CompPrev  := 0     ; the window to hand focus back to when we're done
+global CompNote  := ""    ; your typed note, kept while the box is put away
+global CompEdit  := 0, CompList := 0
 
 global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
 global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
@@ -61,7 +69,7 @@ A_TrayMenu.Add("Edit config.ini directly", (*) => Run(cfg))
 A_TrayMenu.Add("Reload", (*) => Reload())
 A_TrayMenu.Add()
 A_TrayMenu.Add("Exit", (*) => ExitApp())
-A_IconTip := "AI Snap  —  sending to: " Active
+UpdateTrayTip()
 
 TrayTip("AI Snap is running",
         "Talk: " keyDict "   Snip: " keySnip "   Copy: " keySel "   All: " keyAll, 1)
@@ -324,6 +332,52 @@ Log(msg) {
 }
 
 ; ============================================================================
+;  themes — how the windows look. Pick one in Settings.
+; ============================================================================
+global ThemeNames := ["Claude Code", "Codex", "Gemini"]
+
+; bg     = window     panel  = boxes and quiet buttons   accent = the Send button
+; text   = writing    dim    = little grey hints         font   = typeface
+Themes() {
+    return Map(
+      "Claude Code", { bg: "262624", panel: "3A3A37", text: "F5F4EF",
+                       dim: "A6A299", accent: "D97757", accentText: "FFFFFF",
+                       font: "Segoe UI" },
+      "Codex",       { bg: "0D0D0D", panel: "1F1F1F", text: "ECECEC",
+                       dim: "8E8E8E", accent: "10A37F", accentText: "FFFFFF",
+                       font: "Consolas" },
+      "Gemini",      { bg: "1E1F20", panel: "2E2F31", text: "E3E3E3",
+                       dim: "9AA0A6", accent: "8AB4F8", accentText: "202124",
+                       font: "Google Sans" })   ; falls back to your system font
+}
+
+; The theme you picked, or the default if config.ini has something odd in it.
+ThemeNow() {
+    global Theme
+    t := Themes()
+    return t.Has(Theme) ? t[Theme] : t["Claude Code"]
+}
+
+; Dress a window: dark background, dark title bar, themed default font.
+ApplyTheme(g, t) {
+    g.BackColor := t.bg
+    g.SetFont("s10 c" t.text, t.font)
+    ; ask Windows for a dark title bar (20 = DWMWA_USE_IMMERSIVE_DARK_MODE)
+    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 20,
+                "int*", 1, "int", 4)
+}
+
+; A flat coloured button. Real Windows buttons ignore colour, so this is a
+; Text control that behaves like one (+0x200 centres the label vertically).
+ThemeButton(g, t, label, opts, cb, primary := false) {
+    b := g.Add("Text", opts " Center +0x200 Background"
+             . (primary ? t.accent : t.panel)
+             . " c" (primary ? t.accentText : t.text), label)
+    b.OnEvent("Click", cb)
+    return b
+}
+
+; ============================================================================
 ;  the composer — a little box that holds everything you've grabbed so you can
 ;  type a note before it goes. Snips, highlighted text, whole pages: they all
 ;  stack up in here, in order, and go across in one message when you hit Send.
@@ -331,11 +385,6 @@ Log(msg) {
 ;  It's a plain AutoHotkey window, so it works no matter which program you
 ;  grabbed from — nothing is added to the app you're in.
 ; ============================================================================
-global Comp      := 0     ; the composer window while it's open, 0 when it isn't
-global CompItems := []    ; what's attached so far: [{label, data, wait}]
-global CompPrev  := 0     ; the window to hand focus back to when we're done
-global CompEdit  := 0, CompList := 0
-
 ; Take whatever is on the clipboard right now, park it in the composer, and
 ; bring the box up. ClipboardAll() keeps the *whole* clipboard — an image stays
 ; an image — so pasting it later is identical to pasting it now.
@@ -343,33 +392,48 @@ Attach(label, prev, wait) {
     global CompItems
     CompItems.Push({ label: label, data: ClipboardAll(), wait: wait })
     Log("attached: " label)
+    UpdateTrayTip()
     ShowComposer(prev)
 }
 
 ; Open the box, or just bring it back to the front if it's already open.
+; Anything stored earlier is still in there — list and note both.
 ShowComposer(prev) {
-    global Comp, CompItems, CompPrev, CompEdit, CompList
+    global Comp, CompItems, CompPrev, CompNote, CompEdit, CompList
     if Comp {
         Comp.Show()
         RefreshAttachments()
         return
     }
     CompPrev := prev
+    t := ThemeNow()
     Comp := g := Gui("+AlwaysOnTop +ToolWindow -MinimizeBox", "Send to AI")
-    g.SetFont("s10", "Segoe UI")
+    ApplyTheme(g, t)
 
-    g.Add("Text", "xm", "Going to your AI:")
-    CompList := g.Add("ListBox", "xm y+4 w380 r4")
-    g.Add("Button", "xm y+4 w130", "Remove selected").OnEvent("Click", RemoveAttachment)
-    g.Add("Text", "x+10 yp+5 w240 cGray", "Grab more any time — it all stacks up.")
+    g.Add("Text", "xm ym", "Going to your AI:")
+    CompList := g.Add("ListBox", "xm y+6 w418 r4 Background" t.panel " c" t.text)
+    ThemeButton(g, t, "Remove", "xm y+8 w100 h28", RemoveAttachment)
+    g.SetFont("s9 c" t.dim)
+    g.Add("Text", "x+12 yp+5 w300", "Grab more any time — it all stacks up.")
 
-    g.Add("Text", "xm y+12", "Add a note (Enter sends  ·  Shift+Enter = new line):")
-    CompEdit := g.Add("Edit", "xm y+4 w380 r5 +Multi +WantReturn")
+    g.SetFont("s10 c" t.text)
+    g.Add("Text", "xm y+16", "Add a note:")
+    g.SetFont("s9 c" t.dim)
+    g.Add("Text", "x+10 yp+3", "Enter sends  ·  Shift+Enter = new line")
+    g.SetFont("s10 c" t.text)
+    CompEdit := g.Add("Edit", "xm y+6 w418 r5 +Multi +WantReturn Background"
+                            . t.panel " c" t.text)
+    CompEdit.Value := CompNote                  ; whatever you'd typed before
 
-    g.Add("Button", "xm y+12 w130", "Send").OnEvent("Click", ComposerSend)
-    g.Add("Button", "x+10 w90", "Cancel").OnEvent("Click", CancelComposer)
-    g.OnEvent("Escape", CancelComposer)
-    g.OnEvent("Close",  CancelComposer)
+    ThemeButton(g, t, "Send",   "xm y+14 w134 h34", ComposerSend, true)
+    ThemeButton(g, t, "Store",  "x+8 w134 h34",     StoreComposer)
+    ThemeButton(g, t, "Cancel", "x+8 w134 h34",     CancelComposer)
+    g.SetFont("s9 c" t.dim)
+    g.Add("Text", "xm y+8 w418", "Store puts it away and keeps everything — "
+                               . "your next grab opens it back up.")
+
+    g.OnEvent("Escape", StoreComposer)           ; Esc never loses your stuff
+    g.OnEvent("Close",  StoreComposer)
 
     RefreshAttachments()
     g.Show()
@@ -397,12 +461,13 @@ RemoveAttachment(*) {
 ; then Enter. Restoring each saved clipboard and pasting is what lets one
 ; message carry an image, some copied text and your own typing together.
 ComposerSend(*) {
-    global Comp, CompItems, CompPrev, CompEdit
+    global Comp, CompItems, CompPrev, CompNote, CompEdit
     if !Comp
         return
     note  := CompEdit.Value
     items := CompItems
     prev  := CompPrev
+    CompNote := ""
     CloseComposer()                   ; get our window out of the way first
     if (!items.Length && Trim(note) = "")
         return
@@ -425,6 +490,25 @@ ComposerSend(*) {
     GoBack(prev)
 }
 
+; Put it away without sending. Nothing is lost — the list and your note sit
+; there until you grab something else, and the box comes back with the lot.
+StoreComposer(*) {
+    global Comp, CompItems, CompPrev, CompNote, CompEdit
+    if !Comp
+        return
+    CompNote := CompEdit.Value
+    prev := CompPrev
+    Comp.Destroy()
+    Comp := 0
+    Log("stored — " CompItems.Length " item(s) waiting")
+    UpdateTrayTip()
+    if CompItems.Length
+        TrayTip("Stored for later",
+                CompItems.Length " waiting. Grab more, then hit Send.", 1)
+    GoBack(prev)
+}
+
+; Throw the whole lot away.
 CancelComposer(*) {
     global CompPrev
     prev := CompPrev
@@ -434,10 +518,18 @@ CancelComposer(*) {
 }
 
 CloseComposer() {
-    global Comp, CompItems, CompPrev
+    global Comp, CompItems, CompPrev, CompNote
     if Comp
         Comp.Destroy()
-    Comp := 0, CompItems := [], CompPrev := 0
+    Comp := 0, CompItems := [], CompPrev := 0, CompNote := ""
+    UpdateTrayTip()
+}
+
+; Tray tooltip doubles as the "you've got stuff waiting" reminder.
+UpdateTrayTip() {
+    global Active, CompItems
+    A_IconTip := "AI Snap  —  sending to: " Active
+        . (CompItems.Length ? "`n" CompItems.Length " waiting to send" : "")
 }
 
 ; Squash text down to one short line so it reads nicely in the list.
@@ -450,36 +542,48 @@ Preview(t) {
 ;  settings window — click a box, press the keys you want, Save.
 ; ============================================================================
 ShowSettings(*) {
-    global cfg, Apps, Active
+    global cfg, Apps, Active, Theme, ThemeNames
+    t := ThemeNow()
     g := Gui("+AlwaysOnTop -MinimizeBox", "AI Snap settings")
-    g.SetFont("s10", "Segoe UI")
+    ApplyTheme(g, t)
 
     g.Add("Text", "xm", "Send to:")
     names := ["Auto — whichever app I used last"]
     for a in Apps
         names.Push(a.name)
-    ddTarget := g.Add("DropDownList", "x+6 yp-4 w240", names)
+    ddTarget := g.Add("DropDownList", "x+6 yp-4 w240 Background" t.panel " c" t.text, names)
     ddTarget.Choose(1)
     for i, a in Apps
         if (a.name = Active)
             ddTarget.Choose(i + 1)
 
+    g.Add("Text", "xm y+10", "Look:")
+    ddTheme := g.Add("DropDownList", "x+6 yp-4 w240 Background" t.panel " c" t.text,
+                     ThemeNames)
+    ddTheme.Choose(1)
+    for i, n in ThemeNames
+        if (n = Theme)
+            ddTheme.Choose(i)
+
     g.Add("Text", "xm y+16", "Click a box, then press the keys you'd like to use:")
 
     g.Add("Text",   "xm y+14 w190",       "Talk to my AI (dictation)")
-    hkDict := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "Dictate",       "!1"))
+    hkDict := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "Dictate",       "!1"))
     g.Add("Text",   "xm y+10 w190",       "Snip screenshot → AI")
-    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "SnipAndSend",   "!2"))
+    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "SnipAndSend",   "!2"))
     g.Add("Text",   "xm y+10 w190",       "Copy highlighted → AI")
-    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopySelection", "!3"))
+    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "CopySelection", "!3"))
     g.Add("Text",   "xm y+10 w190",       "Select-all page → AI")
-    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!4"))
+    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!4"))
     g.Add("Text",   "xm y+10 w190",       "Send manually")
-    hkPost := g.Add("Hotkey", "x+6 yp-4 w150", IniRead(cfg, "Hotkeys", "Post",          "!0"))
+    hkPost := g.Add("Hotkey", "x+6 yp-4 w150 Background" t.panel " c" t.text, IniRead(cfg, "Hotkeys", "Post",          "!0"))
 
     g.Add("Text", "xm y+14 w190", "My dictation push-to-talk key")
-    edDictKey := g.Add("Edit", "x+6 yp-4 w60", IniRead(cfg, "Dictation", "Key", "F4"))
+    edDictKey := g.Add("Edit", "x+6 yp-4 w60 Background" t.panel " c" t.text,
+                       IniRead(cfg, "Dictation", "Key", "F4"))
+    g.SetFont("s9 c" t.dim)
     g.Add("Text", "x+10 yp+4", "(as set in Handy)")
+    g.SetFont("s10 c" t.text)
 
     cbComp := g.Add("Checkbox", "xm y+16", "Open the composer so I can add a note first")
     cbComp.Value := (IniRead(cfg, "Behavior", "Composer", "1") = "1")
@@ -488,8 +592,8 @@ ShowSettings(*) {
     cbRestore := g.Add("Checkbox", "xm y+8", "Return to my window after each action")
     cbRestore.Value := (IniRead(cfg, "Behavior", "RestoreFocus", "1") = "1")
 
-    g.Add("Button", "xm y+18 w120 Default", "Save && Reload").OnEvent("Click", Save)
-    g.Add("Button", "x+10 w90", "Cancel").OnEvent("Click", (*) => g.Destroy())
+    ThemeButton(g, t, "Save and reload", "xm y+18 w150 h34", Save, true)
+    ThemeButton(g, t, "Cancel", "x+8 w110 h34", (*) => g.Destroy())
     g.OnEvent("Escape", (*) => g.Destroy())
     g.Show()
 
@@ -506,6 +610,7 @@ ShowSettings(*) {
         }
         pick := ddTarget.Value                  ; 1 = Auto, else Apps[pick-1]
         IniWrite(pick = 1 ? "Auto" : Apps[pick - 1].name, cfg, "Target", "Active")
+        IniWrite(ThemeNames[ddTheme.Value], cfg, "Look", "Theme")
         IniWrite(hkDict.Value, cfg, "Hotkeys", "Dictate")
         IniWrite(hkSnip.Value, cfg, "Hotkeys", "SnipAndSend")
         IniWrite(hkSel.Value,  cfg, "Hotkeys", "CopySelection")

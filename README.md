@@ -53,12 +53,37 @@ Snip or copy anything and this little box appears:
 
 - **Type a note** — it gets sent underneath whatever you grabbed.
 - **Keep grabbing** — press **Alt+2**, **Alt+3** or **Alt+4** again while it's open and the new bit joins the list. A screenshot, a paragraph you copied and your own question all arrive as **one message**.
-- Grabbed the wrong thing? Click it in the list → **Remove selected**.
-- **Enter** sends. **Shift+Enter** starts a new line. **Esc** throws it all away.
+- Grabbed the wrong thing? Click it in the list → **Remove**.
+
+Three buttons:
+
+| Button | What it does |
+|---|---|
+| **Send** | The whole lot goes to your AI as one message. |
+| **Store** | Puts the box away and **keeps everything** — list *and* what you'd half-typed. Nothing is sent. |
+| **Cancel** | Throws it all away. |
+
+**Store** is the one that lets you build a message over time. Snip an error → **Store**. Two minutes later, snip the log and copy a line of code → the box opens back up with the first snip still sitting there. Add your question, hit **Send**, and it all arrives together.
+
+While something's waiting, the tray icon tooltip tells you how many.
+
+**Enter** sends · **Shift+Enter** new line · **Esc** stores (so you never lose a thing by tapping it).
 
 It's AI Snap's own window, so it works the same whether you grabbed from Word, a browser, a PDF, a game or your email — nothing is added to the program you're in, and the box hides itself while you're dragging a snip so it never ends up in your own screenshot.
 
 Don't want it? Settings → untick *"Open the composer so I can add a note first"*.
+
+### Themes
+
+Settings → **Look**. Three to pick from, all dark:
+
+| Theme | |
+|---|---|
+| **Claude Code** | Warm dark with the Claude orange. The default. |
+| **Codex** | Near-black terminal look, monospaced, green. |
+| **Gemini** | Cool dark grey with Google blue. |
+
+Or set it by hand: `Theme = Codex` under `[Look]` in `config.ini`.
 
 ---
 
