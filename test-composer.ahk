@@ -40,7 +40,26 @@ RemoveAttachment()
 Check(CompItems.Length = 1,                            "remove drops one")
 Check(CompItems[1].label = "Text: second grab",        "remove drops the right one")
 
+; Store puts the box away without losing a thing, and the next grab brings it
+; all back — that's the whole point of the button.
+CompEdit.Value := "half-written note"
+StoreComposer()
+Check(Comp = 0,                                        "store closes the window")
+Check(CompItems.Length = 1,                            "store keeps the attachments")
+Check(CompNote = "half-written note",                  "store keeps the note")
+ShowComposer(0)
+Check(Comp != 0,                                       "next grab reopens it")
+Check(CompEdit.Value = "half-written note",            "the note comes back")
+Check(CompList.Text = "",                              "nothing is selected on reopen")
+
+for name in ThemeNames {
+    Theme := name
+    Check(ThemeNow().accent != "" && ThemeNow().font != "", "theme " name " is complete")
+}
+Theme := "something deleted from config.ini"
+Check(ThemeNow().accent = Themes()["Claude Code"].accent, "unknown theme falls back")
+
 CloseComposer()
-Check(Comp = 0 && CompItems.Length = 0,                "close clears everything")
+Check(Comp = 0 && CompItems.Length = 0 && CompNote = "", "close clears everything")
 
 ExitApp(fails)
