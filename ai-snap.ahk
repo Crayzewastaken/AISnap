@@ -374,16 +374,7 @@ ChooseApp() {
     match := (target != "" && SubStr(target, -4) = ".exe")
         ? "ahk_exe " SubStr(target, InStr(target, "\", , -1) + 1)
         : name
-    return { name: name, match: match, launch: path, enter: AskEnter(name) }
-}
-
-; The one thing we can't work out for ourselves: is this a chat box or a
-; document? Enter sends a message in one and ruins your paragraph in the other.
-AskEnter(name) {
-    return MsgBox("Press Enter after pasting into " name "?`n`n"
-                . "Yes — it's a chat box, Enter sends the message.`n"
-                . "No — it's a document, Enter would just add a blank line.",
-                  "AI Snap", "YesNo Iconi") = "Yes" ? "1" : "0"
+    return { name: name, match: match, launch: path, enter: "1" }
 }
 
 ; ---- picking an app by clicking it ------------------------------------------
@@ -441,29 +432,62 @@ GrabNextWindow(start) {
                 ClickSeen := false
                 Sleep(350)                               ; let the window come up
             }
-            try {
-                if !(id := WinActive("A")) || (!clicked && id = start)
-                    continue
-                if (WinGetPID("ahk_id " id) = me)        ; our own windows don't count
-                    continue
-                if (WinGetTitle("ahk_id " id) = "")      ; nameless helper windows
-                    continue
-                ; the taskbar, the desktop and the Start menu aren't apps
-                if (WinGetClass("ahk_id " id) ~= "^(Shell_TrayWnd|Shell_SecondaryTrayWnd"
-                                               . "|Progman|WorkerW|NotifyIconOverflowWindow"
-                                               . "|TaskListThumbnailWnd)$")
-                    continue
-                if (WinGetProcessName("ahk_id " id) ~= "i)^(StartMenuExperienceHost"
-                                                     . "|SearchHost|ShellExperienceHost"
-                                                     . "|TextInputHost)\.exe$")
-                    continue
+            if (id := WinActive("A")) && (clicked || id != start) && IsAppWindow(id, me)
                 return id
-            }                                            ; window vanished mid-check
         }
         return 0
     }
     finally
         Hotkey("~LButton Up", NoteClick, "Off")
+}
+
+; Is this a window you'd actually want to send something to? The taskbar, the
+; desktop, the Start menu and our own windows are not apps.
+IsAppWindow(id, me) {
+    try {
+        if (WinGetPID("ahk_id " id) = me)
+            return false
+        if (WinGetTitle("ahk_id " id) = "")              ; nameless helper windows
+            return false
+        cls := WinGetClass("ahk_id " id)
+        if (cls ~= "^(Shell_TrayWnd|Shell_SecondaryTrayWnd"
+                 . "|Progman|WorkerW|NotifyIconOverflowWindow"
+                 . "|TaskListThumbnailWnd)$")
+            return false
+        exe := WinGetProcessName("ahk_id " id)
+        if (exe ~= "i)^(StartMenuExperienceHost|SearchHost|ShellExperienceHost"
+                 . "|TextInputHost)\.exe$")
+            return false
+        ; Explorer owns the taskbar, the desktop and a pile of invisible shell
+        ; windows. Clicking a taskbar button can leave one of them briefly in
+        ; front, and grabbing it gets you "ahk_exe explorer.exe" instead of the
+        ; app you meant. A real folder window is the only one worth having.
+        if (exe = "explorer.exe" && cls != "CabinetWClass")
+            return false
+        return true
+    }
+    return false                                         ; window vanished mid-check
+}
+
+; Everything you've got open right now, ready to be added. One entry per
+; program — ten browser tabs are still one browser — most recent first,
+; which is the order Windows hands its windows back in.
+RunningApps() {
+    me := DllCall("GetCurrentProcessId")
+    seen := Map(), out := []
+    DetectHiddenWindows(false)
+    for id in WinGetList() {
+        if !DllCall("IsWindowVisible", "ptr", id) || !IsAppWindow(id, me)
+            continue
+        try {
+            exe := WinGetProcessName("ahk_id " id)
+            if seen.Has(exe)
+                continue
+            seen[exe] := true
+            out.Push(AppFacts(id, exe))
+        }
+    }
+    return out
 }
 
 IsBrowser(exe) => exe ~= "i)^(chrome|msedge|firefox|brave|opera|vivaldi)\.exe$"
@@ -476,14 +500,18 @@ CleanName(s) => RegExReplace(Trim(s), "[=|;\[\]]", "-")
 ; Browsers are backwards: there the last bit is the browser and the bit before
 ; it is the page you actually want — "T3 Chat - Google Chrome" → "T3 Chat".
 NameFromWindow(title, exe) {
-    bits := StrSplit(Trim(title), " - ")
-    pick := ""
-    if (bits.Length > 1)                    ; an empty title splits into nothing,
-        pick := Trim(IsBrowser(exe)         ; so never reach into bits blind
-                     ? bits[bits.Length - 1]
-                     : bits[bits.Length])
-    else if (bits.Length = 1 && IsBrowser(exe))
-        pick := Trim(bits[1])               ; a web app titled just "T3 Chat"
+    title := Trim(title)
+    bits  := StrSplit(title, " - ")
+    pick  := ""
+    if IsBrowser(exe) {
+        ; Everything up to the browser's own name is the page. Don't take just
+        ; the last piece of it — "Google Flow - Aug 04, 05:42 PM - Opera" would
+        ; come back called "Aug 04, 05:42 PM".
+        pick := (bits.Length > 1)
+            ? Trim(SubStr(title, 1, InStr(title, " - ", , -1) - 1))
+            : title                         ; a web app titled just "T3 Chat"
+    } else if (bits.Length > 1)             ; an empty title splits into nothing,
+        pick := Trim(bits[bits.Length])     ; so never reach into bits blind
     return pick != "" ? pick : RegExReplace(exe, "i)\.exe$", "")
 }
 
@@ -491,18 +519,34 @@ NameFromWindow(title, exe) {
 ; one exe, so "ahk_exe chrome.exe" alone would find whichever tab was last open.
 MatchFor(name, exe) => IsBrowser(exe) ? name " ahk_exe " exe : "ahk_exe " exe
 
-; Turn the window you clicked into an [Apps] entry, with a chance to rename it.
-AppFromWindow(id) {
-    exe  := WinGetProcessName("ahk_id " id)
+; Everything we can work out about a window on our own. Enter defaults to on
+; because most things you send to are a chat box — flip it on the row if not.
+AppFacts(id, exe := "") {
+    if (exe = "")
+        exe := WinGetProcessName("ahk_id " id)
     path := ""
     try path := WinGetProcessPath("ahk_id " id)     ; so we can reopen it later
-    ib := InputBox("What should this app be called?", "AI Snap", "w300 h130",
-                   NameFromWindow(WinGetTitle("ahk_id " id), exe))
+    name := CleanName(NameFromWindow(WinGetTitle("ahk_id " id), exe))
+    return { name: name, match: MatchFor(name, exe), launch: path, enter: "1",
+             exe: exe, title: WinGetTitle("ahk_id " id) }
+}
+
+AppFromWindow(id) => ConfirmName(AppFacts(id))
+
+; A browser tab's name IS half its window match, and a page title is long and
+; changes as you browse — so that one's worth a look. Everything else we
+; already know for certain, so adding it is one click and no questions.
+ConfirmName(app) {
+    if !IsBrowser(app.exe)
+        return app
+    ib := InputBox("Call this what appears in the title bar — a short bit of it"
+                 . " is best, so it still matches tomorrow.",
+                   "AI Snap", "w340 h160", app.name)
     if (ib.Result != "OK" || Trim(ib.Value) = "")
         return 0
-    name := CleanName(ib.Value)
-    return { name: name, match: MatchFor(name, exe), launch: path,
-             enter: AskEnter(name) }
+    app.name  := CleanName(ib.Value)
+    app.match := MatchFor(app.name, app.exe)
+    return app
 }
 
 ; Write a line to ai-snap.log when Debug=1 in config.ini.
@@ -643,9 +687,11 @@ Attach(label, prev, wait) {
 ; There's no title bar to grab, so dragging the heading moves the card.
 ; 0xA1 = "act like the mouse went down on the caption", 2 = the caption.
 DragCard(wParam, lParam, msg, hwnd) {
-    global Comp, CompHead
+    global Comp, CompHead, SetGui, SetHead
     if (Comp && CompHead && hwnd = CompHead.Hwnd)
         PostMessage(0xA1, 2, 0, , "ahk_id " Comp.Hwnd)
+    else if (SetGui && SetHead && hwnd = SetHead.Hwnd)
+        PostMessage(0xA1, 2, 0, , "ahk_id " SetGui.Hwnd)
 }
 
 ; Open the box, or just bring it back to the front if it's already open.
@@ -815,119 +861,377 @@ Preview(t) {
 }
 
 ; ============================================================================
-;  settings window — click a box, press the keys you want, Save.
+;  settings — one card. Your apps live at the top as a list you can add to,
+;  remove from and pick from; keys and options sit underneath.
+;
+;  Adding or removing an app changes how tall the card is, so the same trick
+;  the composer uses applies here: throw the window away and build it again,
+;  carrying anything you'd already typed across in SetPend.
 ; ============================================================================
-ShowSettings(*) {
-    global cfg, Apps, Active, Theme, ThemeNames
+global SetGui  := 0        ; the settings window while it's open
+global SetHead := 0        ; its heading, which you drag the card by
+global SetCtl  := Map()    ; the one free-text box, so we can read it back
+global SetPend := Map()    ; every setting as it stands, saved or not
+global SetTheme := ""      ; the theme as saved, while you try others on
+
+; Everything editable in one Map, loaded once when the card first opens.
+; Clicking a pill just changes a value in here and rebuilds, so what you see
+; is always what would be saved — including the theme, which repaints live.
+SettingsState() {
+    global SetPend, cfg, Active, Theme
+    if SetPend.Count
+        return
+    SetPend["target"]  := Active
+    SetPend["theme"]   := Theme
+    SetPend["dict"]    := IniRead(cfg, "Hotkeys",   "Dictate",       "!1")
+    SetPend["snip"]    := IniRead(cfg, "Hotkeys",   "SnipAndSend",   "!2")
+    SetPend["sel"]     := IniRead(cfg, "Hotkeys",   "CopySelection", "!3")
+    SetPend["all"]     := IniRead(cfg, "Hotkeys",   "CopyAllOnPage", "!4")
+    SetPend["post"]    := IniRead(cfg, "Hotkeys",   "Post",          "!0")
+    SetPend["dictkey"] := IniRead(cfg, "Dictation", "Key",           "F4")
+    SetPend["comp"]    := IniRead(cfg, "Behavior",  "Composer",      "1")
+    SetPend["auto"]    := IniRead(cfg, "Behavior",  "AutoSend",      "1")
+    SetPend["restore"] := IniRead(cfg, "Behavior",  "RestoreFocus",  "1")
+}
+
+; Build the card again with the list as it is now, keeping your unsaved edits.
+RefreshSettings() {
+    global SetCtl, SetPend
+    for key, c in SetCtl                        ; the free-text box isn't a pill,
+        try SetPend[key] := c.Value             ; so its value has to be rescued
+    ShowSettings()
+}
+
+; Shut it and forget the unsaved edits, so next time reflects config.ini.
+; That includes the theme: previewing one paints the real windows, so backing
+; out has to put the saved one back or the composer keeps the colours you
+; didn't choose.
+CloseSettings() {
+    global SetGui, SetPend, SetCtl, SetTheme, Theme
+    if SetGui
+        try SetGui.Destroy()
+    if (SetTheme != "")
+        Theme := SetTheme
+    SetGui := 0, SetPend := Map(), SetCtl := Map(), SetTheme := ""
+}
+
+SetOne(key, val) {
+    global SetPend
+    SetPend[key] := val
+    RefreshSettings()
+}
+
+; "!1" reads as "Alt + 1" to anyone who doesn't write AutoHotkey for fun.
+Pretty(hk) {
+    out := ""
+    for pair in [["^", "Ctrl"], ["!", "Alt"], ["+", "Shift"], ["#", "Win"]] {
+        if InStr(hk, pair[1]) {
+            out .= pair[2] " + "
+            hk := StrReplace(hk, pair[1])
+        }
+    }
+    return out StrUpper(hk)
+}
+
+; Ask for a key combo. AHK has a Hotkey control that does this in one line,
+; but it's a white box that refuses every colour option, and one white box in
+; a dark card looks like a bug. So: a little card, and the next key wins.
+CaptureCombo(label) {
+    global SetGui
     t := ThemeNow()
-    g := Gui("+AlwaysOnTop -MinimizeBox", "AI Snap settings")
+    c := Gui("-Caption +AlwaysOnTop +ToolWindow" (SetGui ? " +Owner" SetGui.Hwnd : ""))
+    c.MarginX := 24, c.MarginY := 22
+    ApplyTheme(c, t)
+    c.SetFont("s11 w600 c" t.text)
+    c.Add("Text", "xm ym w300 Center", label)
+    c.SetFont("s9 c" t.dim)
+    c.Add("Text", "xm y+12 w300 Center", "Press the keys you want.`nEsc keeps the old one.")
+    c.Show()
+
+    ih := InputHook()
+    ih.KeyOpt("{All}", "E")                     ; any key ends the wait...
+    ih.KeyOpt("{LCtrl}{RCtrl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}", "-E")
+    ih.Start()                                  ; ...except the modifiers
+    ih.Wait(20)
+    mods := (GetKeyState("Ctrl",  "P") ? "^" : "")   ; read while still held
+          . (GetKeyState("Alt",   "P") ? "!" : "")
+          . (GetKeyState("Shift", "P") ? "+" : "")
+          . ((GetKeyState("LWin", "P") || GetKeyState("RWin", "P")) ? "#" : "")
+    key := ih.EndKey
+    c.Destroy()
+    if (ih.EndReason != "EndKey" || key = "Escape")
+        return ""
+    ; A bare key would be swallowed everywhere, in every program, forever.
+    ; Enter as your send key means you can never type Enter again.
+    if (mods = "") {
+        MsgBox("Hold Ctrl, Alt, Shift or the Windows key with it.`n`n"
+             . "On its own, " key " would stop working everywhere else.",
+               "AI Snap", "Iconi 4096")
+        return ""
+    }
+    return mods key
+}
+
+Rebind(key, label) {
+    if (combo := CaptureCombo(label))
+        SetOne(key, combo)
+}
+
+ShowSettings(*) {
+    global cfg, Apps, Theme, ThemeNames
+    global SetGui, SetHead, SetCtl, SetPend, SetTheme
+    SettingsState()
+    if SetGui {
+        try SetGui.Destroy()
+        SetGui := 0
+    }
+    SetCtl := Map()
+    if (SetTheme = "")                        ; remember the saved one first,
+        SetTheme := Theme                     ; Cancel has to be able to undo this
+    Theme := SetPend["theme"]                 ; so the card repaints as you pick
+    t := ThemeNow()
+    W := 412                                  ; content width everything lines up to
+    RowH := 34                                ; and one row height, everywhere
+    SetGui := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap settings")
+    g.MarginX := 20, g.MarginY := 18
     ApplyTheme(g, t)
 
-    g.Add("Text", "xm", "Send to:")
-    names := ["Auto — whichever app I used last"]
-    for a in Apps
-        names.Push(a.name)
-    names.Push("Click an app to add it…")   ; the last two rows add an app
-    names.Push("Choose an app…")            ; rather than pick one — see PickApp
-    ddTarget := g.Add("DropDownList", "x+6 yp-4 w240 -E0x200 Background" t.panel " c" t.text, names)
-    ddTarget.Choose(1)
+    ; ---- heading -----------------------------------------------------------
+    g.SetFont("s12 w600 c" t.text)
+    SetHead := g.Add("Text", "xm ym w" (W - 40) " +0x100", "AI Snap")   ; 0x100 = clickable
+    g.SetFont("s12 c" t.dim)
+    g.Add("Text", "x+0 yp-2 w32 h28 Center +0x200 +0x100 Background" t.bg, "✕")
+        .OnEvent("Click", (*) => CloseSettings())
+
+    ; ---- your apps ---------------------------------------------------------
+    Section("Send to")
+    Row("Auto", "whichever app I used last", "Auto")
     for i, a in Apps
-        if (a.name = Active)
-            ddTarget.Choose(i + 1)
-    addRow   := names.Length - 1            ; where "Click an app…" sits
-    prevPick := ddTarget.Value              ; what to go back to if you cancel
-    ddTarget.OnEvent("Change", PickApp)
+        Row(a.name, a.match, a.name, i, a.enter)
 
-    g.Add("Text", "xm y+10", "Look:")
-    ddTheme := g.Add("DropDownList", "x+6 yp-4 w240 -E0x200 Background" t.panel " c" t.text,
-                     ThemeNames)
-    ddTheme.Choose(1)
-    for i, n in ThemeNames
-        if (n = Theme)
-            ddTheme.Choose(i)
-
-    g.Add("Text", "xm y+16", "Click a box, then press the keys you'd like to use:")
-
-    g.Add("Text",   "xm y+14 w190",       "Talk to my AI (dictation)")
-    hkDict := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "Dictate",       "!1"))
-    g.Add("Text",   "xm y+10 w190",       "Snip screenshot → AI")
-    hkSnip := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "SnipAndSend",   "!2"))
-    g.Add("Text",   "xm y+10 w190",       "Copy highlighted → AI")
-    hkSel  := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "CopySelection", "!3"))
-    g.Add("Text",   "xm y+10 w190",       "Select-all page → AI")
-    hkAll  := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "CopyAllOnPage", "!4"))
-    g.Add("Text",   "xm y+10 w190",       "Send manually")
-    hkPost := g.Add("Hotkey", "x+6 yp-4 w150 h26", IniRead(cfg, "Hotkeys", "Post",          "!0"))
-
-    g.Add("Text", "xm y+14 w190", "My dictation push-to-talk key")
-    edDictKey := g.Add("Edit", "x+6 yp-4 w60 h26 -E0x200 Background" t.panel " c" t.text,
-                       IniRead(cfg, "Dictation", "Key", "F4"))
-    g.SetFont("s9 c" t.dim)
-    g.Add("Text", "x+10 yp+4", "(as set in Handy)")
     g.SetFont("s10 c" t.text)
+    ThemeButton(g, t, "Running apps",  "xm y+12 w132 h" RowH, (*) => ShowRunningApps())
+    ThemeButton(g, t, "Click an app",  "x+8 w132 h" RowH,     PickByClick)
+    ThemeButton(g, t, "Browse…",       "x+8 w132 h" RowH,     PickByBrowse)
 
-    cbComp := g.Add("Checkbox", "xm y+16", "Open the composer so I can add a note first")
-    cbComp.Value := (IniRead(cfg, "Behavior", "Composer", "1") = "1")
-    cbAuto := g.Add("Checkbox", "xm y+8", "Send to the AI automatically every time")
-    cbAuto.Value := (IniRead(cfg, "Behavior", "AutoSend", "1") = "1")
-    cbRestore := g.Add("Checkbox", "xm y+8", "Return to my window after each action")
-    cbRestore.Value := (IniRead(cfg, "Behavior", "RestoreFocus", "1") = "1")
+    ; ---- keys --------------------------------------------------------------
+    Section("Keys")
+    KeyRow("Talk to my AI (dictation)",  "dict")
+    KeyRow("Snip screenshot → send",     "snip")
+    KeyRow("Send what I've highlighted", "sel")
+    KeyRow("Select all → send",          "all")
+    KeyRow("Send manually",              "post")
 
-    ThemeButton(g, t, "Save and reload", "xm y+18 w160 h38", Save, true)
-    ThemeButton(g, t, "Cancel", "x+10 w120 h38", (*) => g.Destroy())
-    g.OnEvent("Escape", (*) => g.Destroy())
+    g.SetFont("s10 c" t.text)
+    g.Add("Text", "xm y+6 w" (W - 190) " h" RowH " +0x200", "My push-to-talk key")
+    SetCtl["dictkey"] := ed := g.Add("Edit",
+        "x+8 yp+3 w72 h28 Center -E0x200 Background" t.panel " c" t.text, SetPend["dictkey"])
+    g.SetFont("s8 c" t.dim)
+    g.Add("Text", "x+8 yp+6 w96", "as set in Handy")
 
-    for c in [ddTarget, ddTheme, hkDict, hkSnip, hkSel, hkAll, hkPost, edDictKey]
-        Round(c, 6)
+    ; ---- look --------------------------------------------------------------
+    Section("Look")
+    Segment("theme", ThemeNames)
+
+    ; ---- options -----------------------------------------------------------
+    Section("Options")
+    Toggle("comp",    "Ask me for a note first")
+    Toggle("auto",    "Send automatically")
+    Toggle("restore", "Come back to my window")
+
+    ; ---- save --------------------------------------------------------------
+    ThemeButton(g, t, "Save and reload", "xm y+18 w" (W - 140) " h40", Save, true)
+    ThemeButton(g, t, "Cancel", "x+8 w132 h40", (*) => CloseSettings())
+    g.OnEvent("Escape", (*) => CloseSettings())
+    g.OnEvent("Close",  (*) => CloseSettings())
+
+    Round(ed, 8)
     g.Show()
 
-    ; The two bottom rows add an app instead of picking one: "Click an app…"
-    ; waits for you to switch to it, "Choose an app…" opens the Windows picker.
-    ; Either way the new app is slotted in above them and selected. It's saved
-    ; to config.ini straight away, so it's there next time even if you Cancel.
-    PickApp(*) {
-        if (ddTarget.Value < addRow) {
-            prevPick := ddTarget.Value
+    ; A quiet all-caps label with breathing room above it. Cheaper than a rule
+    ; line and it does the same job — it tells your eye a new group started.
+    Section(label) {
+        g.SetFont("s8 w600 c" t.dim)
+        g.Add("Text", "xm y+18 w" W, StrUpper(label))
+        g.SetFont("s10 c" t.text)
+    }
+
+    ; A pill: flat, rounded, accent when it's the one that's on.
+    Pill(opts, label, on, cb, quiet := false) {
+        p := g.Add("Text", opts " +0x200 +0x80 Background" (on ? t.accent : t.panel)
+                 . " c" (on ? t.accentText : (quiet ? t.dim : t.text)), label)
+        p.OnEvent("Click", cb)
+        Round(p, 10)
+        if !on
+            Hover(p, t.panel, t.panelHot)
+        return p
+    }
+
+    ; One app in the list: the name, an Enter toggle, and a ✕ to drop it.
+    ; The name's tooltip is the window it looks for, so the list stays clean
+    ; but you can still see what an entry actually targets.
+    Row(name, hint, pickAs, idx := 0, enter := "") {
+        picked := (SetPend["target"] = pickAs)
+        n := Pill("xm y+6 w" (idx ? W - 112 : W) " h" RowH, "   " name, picked,
+                  Picker(pickAs))
+        n.ToolTip := hint
+        if !idx
             return
-        }
-        byClick := (ddTarget.Value = addRow)
-        ddTarget.Choose(prevPick)               ; never leave an "add" row showing
-        if !(app := byClick ? ClickApp(g) : ChooseApp())
-            return
-        Apps.Push(app)
-        IniWrite(app.match " | " app.launch " | " app.enter, cfg, "Apps", app.name)
-        ddTarget.Delete(addRow + 1)             ; drop both add rows, highest first,
-        ddTarget.Delete(addRow)                 ; then put them back under the new name
-        ddTarget.Add([app.name, "Click an app to add it…", "Choose an app…"])
-        prevPick := addRow
-        addRow   += 1
-        ddTarget.Choose(prevPick)
+        on := (enter = "1")
+        e := Pill("x+8 yp w64 h" RowH " Center", on ? "Enter" : "no ↵", false,
+                  Toggler(idx), !on)
+        e.ToolTip := "Press Enter after pasting`nOn for a chat box, off for a document"
+        x := Pill("x+8 yp w32 h" RowH " Center", "✕", false, Dropper(idx), true)
+        x.ToolTip := "Remove " name
+    }
+
+    KeyRow(label, key) {
+        g.SetFont("s10 c" t.text)
+        g.Add("Text", "xm y+6 w" (W - 168) " h" RowH " +0x200", label)
+        Pill("x+8 yp w160 h" RowH " Center", Pretty(SetPend[key]), false,
+             Rebinder(key, label))
+    }
+
+    ; Three side-by-side pills — one is on, and picking is one click, not two.
+    ; NB: don't call that width "w". AHK variable names are case-insensitive, so
+    ; a nested function's "w" IS the enclosing "W", and every control after this
+    ; one silently gets the wrong width.
+    Segment(key, options) {
+        each := (W - (options.Length - 1) * 8) // options.Length
+        for i, opt in options
+            Pill((i = 1 ? "xm y+8" : "x+8 yp") " w" each " h" RowH " Center", opt,
+                 SetPend[key] = opt, Setter(key, opt))
+    }
+
+    Toggle(key, label) {
+        on := (SetPend[key] = "1")
+        Pill("xm y+6 w" (W - 76) " h" RowH, "   " label, false, Flipper(key))
+        Pill("x+8 yp w68 h" RowH " Center", on ? "on" : "off", on, Flipper(key), true)
+    }
+
+    ; One handler per row, so each keeps its own index — a closure made inside
+    ; the loop would share the last one.
+    Picker(what)       => (*) => SetOne("target", what)
+    Toggler(i)         => (*) => ToggleEnter(i)
+    Dropper(i)         => (*) => RemoveApp(i)
+    Setter(key, val)   => (*) => SetOne(key, val)
+    Flipper(key)       => (*) => SetOne(key, SetPend[key] = "1" ? "0" : "1")
+    Rebinder(key, lbl) => (*) => Rebind(key, lbl)
+
+    PickByClick(*) {
+        if (app := ClickApp(g))
+            AddApp(app)
+    }
+    PickByBrowse(*) {
+        if (app := ChooseApp())
+            AddApp(app)
     }
 
     Save(*) {
-        for hk in [hkDict, hkSnip, hkSel, hkAll, hkPost] {
-            if (hk.Value = "") {
-                MsgBox("Every box needs a key combo.", "AI Snap", "Iconx 4096")
-                return
-            }
-        }
-        if (Trim(edDictKey.Value) = "") {
+        global SetCtl, SetPend, SetTheme, cfg
+        SetPend["dictkey"] := Trim(SetCtl["dictkey"].Value)
+        if (SetPend["dictkey"] = "") {
             MsgBox("Which key does your dictation app use?", "AI Snap", "Iconx 4096")
             return
         }
-        pick := ddTarget.Value                  ; 1 = Auto, else Apps[pick-1]
-        IniWrite(pick = 1 ? "Auto" : Apps[pick - 1].name, cfg, "Target", "Active")
-        IniWrite(ThemeNames[ddTheme.Value], cfg, "Look", "Theme")
-        IniWrite(hkDict.Value, cfg, "Hotkeys", "Dictate")
-        IniWrite(hkSnip.Value, cfg, "Hotkeys", "SnipAndSend")
-        IniWrite(hkSel.Value,  cfg, "Hotkeys", "CopySelection")
-        IniWrite(hkAll.Value,  cfg, "Hotkeys", "CopyAllOnPage")
-        IniWrite(hkPost.Value, cfg, "Hotkeys", "Post")
-        IniWrite(Trim(edDictKey.Value), cfg, "Dictation", "Key")
-        IniWrite(cbComp.Value    ? "1" : "0", cfg, "Behavior", "Composer")
-        IniWrite(cbAuto.Value    ? "1" : "0", cfg, "Behavior", "AutoSend")
-        IniWrite(cbRestore.Value ? "1" : "0", cfg, "Behavior", "RestoreFocus")
-        g.Destroy()
+        IniWrite(SetPend["target"],  cfg, "Target",    "Active")
+        IniWrite(SetPend["theme"],   cfg, "Look",      "Theme")
+        IniWrite(SetPend["dict"],    cfg, "Hotkeys",   "Dictate")
+        IniWrite(SetPend["snip"],    cfg, "Hotkeys",   "SnipAndSend")
+        IniWrite(SetPend["sel"],     cfg, "Hotkeys",   "CopySelection")
+        IniWrite(SetPend["all"],     cfg, "Hotkeys",   "CopyAllOnPage")
+        IniWrite(SetPend["post"],    cfg, "Hotkeys",   "Post")
+        IniWrite(SetPend["dictkey"], cfg, "Dictation", "Key")
+        IniWrite(SetPend["comp"],    cfg, "Behavior",  "Composer")
+        IniWrite(SetPend["auto"],    cfg, "Behavior",  "AutoSend")
+        IniWrite(SetPend["restore"], cfg, "Behavior",  "RestoreFocus")
+        SetTheme := ""                          ; keep the theme, don't undo it
+        CloseSettings()
         Reload()                                ; restart with the new settings
+    }
+}
+
+; ---- what the app list's buttons do -----------------------------------------
+; New apps are written to config.ini straight away, so they survive Cancel.
+AddApp(app) {
+    global Apps, cfg, SetPend
+    for a in Apps {
+        if (a.name = app.name) {                ; already there — just select it
+            SetOne("target", a.name)
+            return
+        }
+    }
+    Apps.Push(app)
+    IniWrite(app.match " | " app.launch " | " app.enter, cfg, "Apps", app.name)
+    Log("added app " app.name " → " app.match)
+    SetOne("target", app.name)
+}
+
+; Anything pinned to an app has to let go of it when the app goes.
+TargetAfterRemove(target, gone) => (target = gone) ? "Auto" : target
+
+RemoveApp(i) {
+    global Apps, cfg, SetPend, Active
+    if (i > Apps.Length)
+        return
+    gone := Apps[i].name
+    Apps.RemoveAt(i)
+    IniDelete(cfg, "Apps", gone)
+    Log("removed app " gone)
+    ; Two things can be pinned to it: what's saved in config.ini, and what
+    ; you've clicked but not saved. They aren't always the same one, and
+    ; either left behind points config.ini at an app that isn't there.
+    if (Active != (kept := TargetAfterRemove(Active, gone))) {
+        Active := kept
+        IniWrite(kept, cfg, "Target", "Active")
+    }
+    SetOne("target", TargetAfterRemove(SetPend["target"], gone))
+}
+
+ToggleEnter(i) {
+    global Apps, cfg
+    if (i > Apps.Length)
+        return
+    a := Apps[i]
+    a.enter := (a.enter = "1") ? "0" : "1"
+    IniWrite(a.match " | " a.launch " | " a.enter, cfg, "Apps", a.name)
+    RefreshSettings()
+}
+
+; ---- pick from what's already open ------------------------------------------
+; The shortest route of the three: everything you have open, one click to add.
+ShowRunningApps() {
+    t := ThemeNow()
+    found := RunningApps()
+    p := Gui("-Caption +AlwaysOnTop +ToolWindow +Owner" (SetGui ? SetGui.Hwnd : ""),
+             "Running apps")
+    p.MarginX := 18, p.MarginY := 16
+    ApplyTheme(p, t)
+    p.SetFont("s12 w600 c" t.text)
+    p.Add("Text", "xm ym w300", "What's open right now")
+    p.SetFont("s8 c" t.dim)
+    p.Add("Text", "xm y+4 w340", "Click one to send to it from now on.")
+    p.SetFont("s10 c" t.text)
+
+    if !found.Length
+        p.Add("Text", "xm y+14 w340", "Nothing to show — open an app first.")
+    for i, app in found {
+        r := p.Add("Text", "xm y+8 w340 h38 +0x200 +0x80 Background" t.panel
+                 . " c" t.text, "   " app.name)
+        r.ToolTip := app.exe "`n" app.title
+        r.OnEvent("Click", Take(app))
+        Round(r, 10)
+        Hover(r, t.panel, t.panelHot)
+    }
+    ThemeButton(p, t, "Cancel", "xm y+16 w340 h38", (*) => p.Destroy())
+    p.OnEvent("Escape", (*) => p.Destroy())
+    p.OnEvent("Close",  (*) => p.Destroy())
+    p.Show()
+
+    Take(app) => (*) => Chosen(app)
+    Chosen(app) {
+        p.Destroy()
+        if (app := ConfirmName(app))
+            AddApp(app)
     }
 }

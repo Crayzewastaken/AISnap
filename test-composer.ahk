@@ -99,13 +99,36 @@ Check(NameFromWindow("", "WINWORD.EXE") = "WINWORD",            "no title at all
 ; browsers are backwards — the last bit is the browser, not the app you want
 Check(NameFromWindow("T3 Chat - Google Chrome", "chrome.exe") = "T3 Chat",
                                                                 "a tab is named after the page")
-Check(NameFromWindow("a video - YouTube - Opera", "opera.exe") = "YouTube",
-                                                                "and not after the browser")
+Check(NameFromWindow("Google Flow - Aug 04, 05:42 PM - Opera", "opera.exe")
+        = "Google Flow - Aug 04, 05:42 PM",                     "the WHOLE page title, not its tail")
 Check(NameFromWindow("T3 Chat", "chrome.exe") = "T3 Chat",      "a web app with no dash keeps its name")
 Check(NameFromWindow("", "chrome.exe") = "chrome",              "a nameless browser window still names it")
 Check(MatchFor("Excel", "EXCEL.EXE") = "ahk_exe EXCEL.EXE",     "an app matches on its exe")
 Check(MatchFor("T3 Chat", "chrome.exe") = "T3 Chat ahk_exe chrome.exe",
                                                                 "a browser tab matches the title too")
+
+; the picker must offer the app you're looking at, and never the shell
+open := RunningApps()
+Check(open.Length > 0,                                          "running apps are found at all")
+shell := false
+for a in open
+    if (a.exe = "explorer.exe")
+        shell := true
+Check(!shell,                                    "the taskbar and desktop are never offered")
+seen := Map(), dupe := false
+for a in open
+    dupe := dupe || seen.Has(a.exe), seen[a.exe] := true
+Check(!dupe,                                     "one entry per program, not per window")
+
+; "!1" has to read as something a human would recognise
+Check(Pretty("!1") = "Alt + 1",                                 "a hotkey reads as words")
+Check(Pretty("^+#f4") = "Ctrl + Shift + Win + F4",              "modifiers come out in order")
+
+; removing an app has to unpin BOTH the saved target and the one you clicked,
+; or config.ini is left pointing at something that isn't there any more
+Check(TargetAfterRemove("Claude", "Claude") = "Auto",           "the pinned app falls back to Auto")
+Check(TargetAfterRemove("Claude", "ChatGPT") = "Claude",        "removing another app leaves it alone")
+Check(TargetAfterRemove("Auto", "Claude") = "Auto",             "Auto stays Auto")
 ; (no space before the ; in that string — AHK reads " ;" as a comment even
 ;  inside quotes, and eats the rest of the line)
 Check(CleanName(";Notes[1] = x|y ") = "-Notes-1- - x-y",        "config.ini's own syntax is stripped out")

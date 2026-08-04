@@ -26,7 +26,9 @@ By default it sends to **whichever supported app you used most recently**, so yo
 
 ## What's new
 
-- **Send it anywhere.** Settings → **Send to** → **Click an app to add it…**, then click the app on your taskbar. That's it — Word, Excel, a browser, T3, anything. Your snips go there from now on. See [Sending to any app](#sending-to-any-app).
+- **Send it anywhere.** Settings now opens on your list of apps. Hit **Running apps**, click the one you want, and your snips go there from now on — Word, Excel, a browser, T3, anything. Or **Click an app** and just click it on your taskbar. See [Sending to any app](#sending-to-any-app).
+- **A settings card, not a dialog.** Same dark rounded look as the composer, and it follows your theme as you pick it. Your apps are a list you can add to, reorder your pick in, and remove from with a ✕ — no dropdown to hunt through.
+- **Keys read like keys.** They show as *Alt + 2*, and clicking one asks you to press the combo you want.
 - **A composer box.** Snip or copy and a little window pops up. Type a note, hit Enter, and it lands in your AI chat as one message.
 - **Stack things up.** Keep snipping and copying while it's open — a screenshot, a paragraph, another screenshot. It all goes across together, in order.
 - **Store button.** Not ready to send? Hit Store. It closes and keeps everything, including what you'd half-typed. Snip something two minutes later and it opens back up with your first grab still sitting there. Build a message over as long as you like, then send once.
@@ -135,7 +137,7 @@ If messages get sent before you've finished, raise `Wait` under `[Dictation]` in
 
 ## Customising
 
-**Easiest way:** double-click the tray icon (or right-click → **Settings…**). A little window opens — pick which AI app to send to, click any box and press the keys you want, tick your options, hit **Save & Reload**. Done.
+**Easiest way:** double-click the tray icon (or right-click → **Settings…**). The card opens on your list of apps — click the one to send to, click a key to change it, flip the options, hit **Save and reload**. Done.
 
 Prefer editing by hand? Everything lives in **`config.ini`** (tray → **Edit config.ini directly**, then **Reload**).
 Hotkey symbols there: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key — so `!1` is Alt+1.
@@ -143,24 +145,26 @@ Hotkey symbols there: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key — 
 
 ### Sending to any app
 
-It doesn't have to be an AI. Open **Settings → Send to** — the bottom two rows add an app instead of picking one.
+It doesn't have to be an AI. Open **Settings** (double-click the tray icon) and the top of the card is your list of apps. Click one to send there from now on, or leave it on **Auto**.
 
-**Click an app to add it…** — the easy one. The settings window gets out of the way, you click the app on your taskbar — or click its window, or alt-tab to it — and whatever you land on is the one. Works for **Word**, **Excel**, a browser tab, **T3**, a game — anything that's open. Press **Esc** if you change your mind, and it gives up on its own after 20 seconds.
+Three ways to add one:
 
-Clicking works even when that app is already the one in front, which it usually is: putting the settings window away hands focus straight back to whatever you were just doing.
+| Button | What it does |
+|---|---|
+| **Running apps** | Shows everything you have open. Click it, done. The quickest one. |
+| **Click an app** | The card gets out of the way and you click the app on your taskbar. **Esc** to back out; it gives up after 20 seconds. |
+| **Browse…** | For apps that aren't running. The normal Windows picker, opened at your Start menu. |
 
-**Choose an app…** — for apps that aren't running. Opens the normal Windows picker at your Start menu, showing the names you already know.
+Each app in the list has two more controls:
 
-Either way it asks you two things:
+- **Enter / no ↵** — click to flip it. **Enter** for a chat box, where Enter is what actually sends the message. **no ↵** for a document, where Enter would just leave a blank line in your work.
+- **✕** — removes it from the list for good.
 
-1. **What should this be called?** — already filled in with its name, change it if you like.
-2. **Press Enter after pasting?** — **Yes** for a chat box, where Enter is what actually sends the message. **No** for a document, where Enter would just leave a blank line in your work.
+Apps are saved the moment you add them, so they're still there next time even if you hit Cancel.
 
-The app is saved straight away, so it's in the dropdown next time too, and **Auto** starts counting it as one of yours.
-
-> **Browser tabs and web apps** — clicking one gets you both the browser *and* its title, so `T3 Chat ahk_exe chrome.exe` finds that window and not whichever tab you had open last. Keep the name matching what's in the title bar.
+> **Browser tabs and web apps** get one extra question, because their name is also how the window is found — every tab shares one `chrome.exe`. Keep it to a short bit of the title bar that won't change, and you get `T3 Chat ahk_exe chrome.exe`, which finds that window and not whichever tab was open last. Everything else is added without asking anything.
 >
-> Some Microsoft Store apps don't show up in the Start menu folder. Click them instead, or browse to the `.exe` yourself.
+> Some Microsoft Store apps don't show up in the Start menu folder. Use **Running apps** or **Click an app** instead.
 
 ### Adding one by hand
 
