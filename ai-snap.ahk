@@ -266,10 +266,41 @@ FocusTarget() {
     WinShow("ahk_id " id)                       ; un-hide if it was in the tray
     WinActivate("ahk_id " id)
     ok := WinWaitActive("ahk_id " id, , 3)
-    if ok
+    if ok {
         GiveFocus(id)
+        ClickSpot(id)
+    }
     Log("FocusTarget id=" id " activated=" (ok ? "yes" : "no"))
     return ok
+}
+
+; Put the caret in the box you actually type in.
+;
+; Inside a browser there is nothing to aim at from out here — the whole page
+; is one window, and its text fields are painted pixels, so no amount of
+; Win32 poking can find them. A click can though, and a click works the same
+; in every program. You point at the box once and we remember the spot as a
+; fraction of the window, so it still lands after you move or resize it, or
+; move it to a different monitor.
+ClickSpot(id) {
+    global LastApp
+    if (!LastApp || LastApp.spot = "")
+        return
+    at := StrSplit(LastApp.spot, ",")
+    if (at.Length != 2)
+        return
+    try {
+        WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " id)
+        ; Integer(), not Round() — this script has its own Round() for corners
+        ; and AHK names are case-insensitive, so the built-in is unreachable.
+        x := wx + Integer(at[1] * ww), y := wy + Integer(at[2] * wh)
+        CoordMode("Mouse", "Screen")
+        MouseGetPos(&mx, &my)             ; put the pointer back afterwards —
+        Click(x, y)                       ; nobody asked us to move their mouse
+        Sleep(120)
+        MouseMove(mx, my, 0)
+        Log("clicked typing spot " x "," y " in " ww "x" wh)
+    }
 }
 
 ; Being the front window isn't the same as being able to receive a keystroke.
@@ -388,8 +419,10 @@ Launch(app) {
     try Run(target)
 }
 
-; Read the [Apps] section into a list of {name, match, launch, enter}.
-; Third field is optional: 0 = don't press Enter after pasting (documents).
+; Read the [Apps] section into a list of {name, match, launch, enter, spot}.
+;   enter  optional, 0 = don't press Enter after pasting (documents)
+;   spot   optional, "0.5,0.92" = where to click before typing, as a fraction
+;          of the window so it survives moving, resizing and other monitors
 LoadApps() {
     global cfg
     apps := []
@@ -407,10 +440,16 @@ LoadApps() {
             apps.Push({ name:   name,
                         match:  match,
                         launch: Trim(bits.Has(2) ? bits[2] : ""),
-                        enter:  (ent = "" ? "1" : ent) })
+                        enter:  (ent = "" ? "1" : ent),
+                        spot:   Trim(bits.Has(4) ? bits[4] : "") })
     }
     return apps
 }
+
+; One place that knows what an [Apps] line looks like, so adding a field
+; doesn't mean hunting down four places that write one.
+AppLine(a) => a.match " | " a.launch " | " a.enter
+            . (a.spot != "" ? " | " a.spot : "")
 
 ; Pick any program on this PC to send to — Word, Excel, a browser, anything.
 ; Opens at the Start menu so you see the names you know, not a pile of .exe
@@ -433,7 +472,7 @@ ChooseApp() {
     match := (target != "" && SubStr(target, -4) = ".exe")
         ? "ahk_exe " SubStr(target, InStr(target, "\", , -1) + 1)
         : name
-    return { name: name, match: match, launch: path, enter: "1" }
+    return { name: name, match: match, launch: path, enter: "1", spot: "" }
 }
 
 ; ---- picking an app by clicking it ------------------------------------------
@@ -456,6 +495,49 @@ ClickApp(g) {
     }
     Log("click-pick: got " id " — " WinGetTitle("ahk_id " id))
     return AppFromWindow(id)
+}
+
+; Point at the box you type in. We get out of the way, you click it, and we
+; keep where you clicked as a fraction of that window. Esc forgets it again.
+GrabSpot(g, app) {
+    global ClickSeen
+    g.Hide()
+    Sleep(250)
+    TrayTip("Click where you type",
+            "Click inside " app.name "'s text box. Esc to forget it.", 1)
+    ClickSeen := false
+    Hotkey("~LButton Up", NoteClick, "On")
+    got := app.spot                                  ; wander off and nothing changes
+    try {
+        Loop 133 {                                   ; ~20 seconds, then give up
+            Sleep(150)
+            if GetKeyState("Escape", "P") {
+                got := ""                            ; Esc is the only thing that clears it
+                break
+            }
+            if !ClickSeen
+                continue
+            ClickSeen := false
+            Sleep(200)                               ; let the click settle
+            try {                                    ; it can close while we look at it
+                CoordMode("Mouse", "Screen")
+                MouseGetPos(&mx, &my, &win)
+                ; It only counts if you clicked inside the app it's meant for.
+                if (!win || !WinExist(app.match " ahk_id " win))
+                    continue
+                WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " win)
+                if (ww < 1 || wh < 1)
+                    continue
+                got := Format("{:.4f},{:.4f}", (mx - wx) / ww, (my - wy) / wh)
+                break
+            }
+        }
+    }
+    finally {
+        Hotkey("~LButton Up", NoteClick, "Off")
+        g.Show()                                     ; never leave the card hidden
+    }
+    return got
 }
 
 ; Wait for you to click an app — taskbar, the window itself, or alt-tab.
@@ -577,7 +659,7 @@ AppFacts(id, exe := "") {
     try path := WinGetProcessPath("ahk_id " id)     ; so we can reopen it later
     name := CleanName(NameFromWindow(WinGetTitle("ahk_id " id), exe))
     return { name: name, match: MatchFor(name, exe), launch: path, enter: "1",
-             exe: exe, title: WinGetTitle("ahk_id " id) }
+             spot: "", exe: exe, title: WinGetTitle("ahk_id " id) }
 }
 
 AppFromWindow(id) => AppFacts(id)
@@ -992,7 +1074,7 @@ CommitRename() {
         IniDelete(cfg, "Apps", was)
         a.match := RematchFor(want, a.match)
         a.name  := want
-        IniWrite(a.match " | " a.launch " | " a.enter, cfg, "Apps", want)
+        IniWrite(AppLine(a), cfg, "Apps", want)
         if (Active = was) {
             Active := want
             IniWrite(want, cfg, "Target", "Active")
@@ -1197,13 +1279,16 @@ ShowSettings(*) {
         ; The one you've selected gets its name in a box, so a long or wrong
         ; one can be fixed here instead of in a dialog you have to go and find.
         SetCtl["rename"] := ed := g.Add("Edit",
-            "xm y+6 w" W " h28 -E0x200 Background" t.panel " c" t.text, name)
+            "xm y+6 w" (W - 160) " h28 -E0x200 Background" t.panel " c" t.text, name)
         Round(ed, 8)
+        spot := Apps[idx].spot
+        Pill("x+8 yp-3 w152 h" RowH " Center", spot != "" ? "typing here ✓" : "where to type",
+             spot != "", Spotter(idx), spot = "")
         g.SetFont("s8 c" t.dim)
-        g.Add("Text", "xm y+4 w" W, RegExMatch(hint, "i)^ahk_exe\s")
-            ? "Call it whatever you like — it's found by its program, so the"
-            . " name is just a label."
-            : "Keep this to a short bit of its title bar — this one has no"
+        g.Add("Text", "xm y+6 w" W, RegExMatch(hint, "i)^ahk_exe\s")
+            ? "Name is just a label — it's found by its program."
+            . (spot != "" ? "  Clicks your box before typing." : "")
+            : "Keep the name to a short bit of its title bar — this one has no"
             . " program behind it, so the name is how the window is found.")
         g.SetFont("s10 c" t.text)
     }
@@ -1237,6 +1322,7 @@ ShowSettings(*) {
     Picker(what)       => (*) => SetOne("target", what)
     Toggler(i)         => (*) => ToggleEnter(i)
     Dropper(i)         => (*) => RemoveApp(i)
+    Spotter(i)         => (*) => SetSpot(g, i)
     Setter(key, val)   => (*) => SetOne(key, val)
     Flipper(key)       => (*) => SetOne(key, SetPend[key] = "1" ? "0" : "1")
     Rebinder(key, lbl) => (*) => Rebind(key, lbl)
@@ -1286,7 +1372,7 @@ AddApp(app) {
         }
     }
     Apps.Push(app)
-    IniWrite(app.match " | " app.launch " | " app.enter, cfg, "Apps", app.name)
+    IniWrite(AppLine(app), cfg, "Apps", app.name)
     Log("added app " app.name " → " app.match)
     SetFresh := true                            ; so the cursor lands in its name
     SetOne("target", app.name)
@@ -1319,7 +1405,33 @@ ToggleEnter(i) {
         return
     a := Apps[i]
     a.enter := (a.enter = "1") ? "0" : "1"
-    IniWrite(a.match " | " a.launch " | " a.enter, cfg, "Apps", a.name)
+    IniWrite(AppLine(a), cfg, "Apps", a.name)
+    RefreshSettings()
+}
+
+; Bring the app up so there's something to point at, then let you click the
+; box you type in. Esc during the pick clears it back to no spot at all.
+SetSpot(g, i) {
+    global Apps, cfg, Active, LastApp
+    if (i > Apps.Length)
+        return
+    a := Apps[i]
+    ; Aim FocusTarget at this one, then put the real target back — including
+    ; when it throws, because a window can close between being found and being
+    ; asked about, and leaving Active pinned here would silently redirect
+    ; every send from then on. A bare try swallows, so the next line always runs.
+    was := Active, Active := a.name
+    ok := false
+    try ok := FocusTarget()
+    Active := was
+    if !ok {
+        TrayTip("Can't find " a.name, "Open it first, then set where to type.", 2)
+        RefreshSettings()
+        return
+    }
+    a.spot := GrabSpot(g, a)
+    IniWrite(AppLine(a), cfg, "Apps", a.name)
+    Log("typing spot for " a.name " = " (a.spot = "" ? "cleared" : a.spot))
     RefreshSettings()
 }
 

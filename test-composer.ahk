@@ -71,7 +71,7 @@ Check(Comp = 0 && CompItems.Length = 0 && CompNote = "", "close clears everythin
 tmp := A_ScriptDir "\test-apps.ini"
 try FileDelete(tmp)
 FileAppend("[Apps]`n"
-         . "Chatty = ahk_exe chat.exe | chat.exe | 1`n"
+         . "Chatty = ahk_exe chat.exe | chat.exe | 1 | 0.5000,0.9200`n"
          . "Wordy = Word | C:\word.lnk | 0`n"
          . "Olde = ahk_exe old.exe`n", tmp)
 real := cfg, cfg := tmp
@@ -82,6 +82,11 @@ Check(picked.Length = 3,                               "three apps parsed")
 Check(picked[2].match = "Word" && picked[2].launch = "C:\word.lnk", "title match + .lnk launch")
 Check(picked[2].enter = "0",                           "document app keeps enter=0")
 Check(picked[3].enter = "1",                           "an old two-field line still sends Enter")
+Check(picked[1].spot = "0.5000,0.9200",                "a typing spot round-trips")
+Check(picked[2].spot = "" && picked[3].spot = "",      "and is empty when it was never set")
+Check(AppLine(picked[1]) = "ahk_exe chat.exe | chat.exe | 1 | 0.5000,0.9200",
+                                                       "the line is written back the same way")
+Check(AppLine(picked[3]) = "ahk_exe old.exe |  | 1",   "no spot means no fourth field")
 
 LastApp := picked[1]
 Check(EnterOK(),                                       "chat app presses Enter")

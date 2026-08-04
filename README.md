@@ -162,6 +162,16 @@ Each app in the list has two more controls:
 - **Enter / no ↵** — click to flip it. **Enter** for a chat box, where Enter is what actually sends the message. **no ↵** for a document, where Enter would just leave a blank line in your work.
 - **✕** — removes it from the list for good.
 
+And on the selected app, a **where to type** button. See below.
+
+### Where to type
+
+Some apps come to the front with the cursor nowhere useful — browsers especially, because a web page decides for itself where its caret sits, and nothing outside the browser can move it. So you show AI Snap once.
+
+Select the app, click **where to type**, and it brings that app up and gets out of the way. Click inside the box you type in — the chat composer, the search field, wherever — and that's it. From then on it clicks there for you before pasting. **Esc** during the pick forgets it again.
+
+The spot is stored as a fraction of the window rather than a screen position, so it still lands after you move the window, resize it, maximise it, or drag it to another monitor. It works the same in any program; browsers are just where you'll want it most.
+
 Apps are saved the moment you add them, so they're still there next time even if you hit Cancel.
 
 > **Browsers** are added as the browser, not as one tab — `ahk_exe opera.exe`. Whatever tab you're on when you send is the one it lands in. Pinning to a tab's title only works until that title changes, which for a browser is about a minute.
@@ -216,7 +226,7 @@ If you'd rather not install AutoHotkey on every machine, right-click `ai-snap.ah
 - **The screenshot doesn't paste** — some apps are slow to attach the image. Raise `AttachWait` under `[Behavior]` in `config.ini` (400 ms by default), or just press the key again.
 - **"Nothing to paste from the clipboard"** — that's the app you sent to, telling you Ctrl+V arrived at an empty clipboard. Update; AI Snap now waits for each grab to land before pasting it. If it happens again, `Debug = 1` writes a "clipboard never came back" line naming the grab that failed.
 - **It sends to the wrong browser tab** — it doesn't pick tabs, it picks the browser, and lands in whatever tab you're on. An old entry pinned to one tab's title (`Some Page ahk_exe opera.exe`) will stop matching once that title changes — rename it in Settings and the match is rebuilt as just the browser.
-- **Nothing arrives in a browser at all** — a Chromium browser can come to the front without anything inside it holding the keyboard, so the paste had nowhere to go. AI Snap now hands the keyboard to the page itself. If text still doesn't appear, **click in the chat box once** — the page decides where a paste lands, and if its caret isn't in a text field then nothing can put it there from outside.
+- **Nothing arrives in a browser at all** — a Chromium browser can come to the front without anything inside it holding the keyboard, so the paste had nowhere to go. AI Snap now hands the keyboard to the page itself. If text still doesn't appear, set **where to type** for that app (see [above](#where-to-type)) — the page decides where a paste lands, and pointing at the box once is the only thing that can settle it from outside.
 - **Quick flicker to the AI app and back** — that's expected. Windows won't let one app type into another without briefly focusing it; AI Snap does that in a blink and returns you. Untick *"Return to my window"* if you'd rather it stay.
 - **Still nothing?** Set `Debug = 1` in `config.ini` and Reload. An `ai-snap.log` appears next to the script showing what fired.
 
