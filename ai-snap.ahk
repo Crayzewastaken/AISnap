@@ -580,7 +580,12 @@ ThemeNow() {
 }
 
 ; Dress a window: dark background, rounded corners, themed default font.
+;   +0x2000000  WS_CLIPCHILDREN — don't paint the background under the controls
+;   +E0x2000000 WS_EX_COMPOSITED — paint the whole window off-screen, once
+; Without these, a card with forty rounded controls flickers every time
+; anything asks it to redraw. Same number, two different style fields.
 ApplyTheme(g, t) {
+    g.Opt("+0x2000000 +E0x2000000")
     g.BackColor := t.bg
     g.SetFont("s10 c" t.text, t.font)
     ; 20 = dark title bar (for windows that still have one)
@@ -646,8 +651,13 @@ HoverCheck() {
     MouseGetPos(, , , &under, 2)          ; 2 = give me the control's hwnd
     if (under = HoverAt)
         return
-    HoverAt := under
+    was := HoverAt, HoverAt := under
     for b in live {
+        ; Only the one you've just left and the one you've just arrived at can
+        ; have changed. Repainting all of them was a whole-card flash every
+        ; time the pointer crossed anything, forty times over.
+        if (b.hwnd != under && b.hwnd != was)
+            continue
         try {
             b.ctrl.Opt("Background" (under = b.hwnd ? b.hot : b.cold))
             b.ctrl.Redraw()
@@ -1083,6 +1093,7 @@ ShowSettings(*) {
         PostMessage(0xB1, 0, -1, SetCtl["rename"])       ; EM_SETSEL = select all
     }
     SetFresh := false
+    Log("settings card built")
 
     ; A quiet all-caps label with breathing room above it. Cheaper than a rule
     ; line and it does the same job — it tells your eye a new group started.
