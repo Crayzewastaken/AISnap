@@ -490,34 +490,24 @@ RunningApps() {
     return out
 }
 
-IsBrowser(exe) => exe ~= "i)^(chrome|msedge|firefox|brave|opera|vivaldi)\.exe$"
-
 ; Anything that would break a config.ini line, or turn it into a comment.
 CleanName(s) => RegExReplace(Trim(s), "[=|;\[\]]", "-")
 
 ; What to call the app you clicked. Windows apps title their windows
-; "Book1 - Excel", so the bit after the last dash is the app itself.
-; Browsers are backwards: there the last bit is the browser and the bit before
-; it is the page you actually want — "T3 Chat - Google Chrome" → "T3 Chat".
+; "Book1 - Excel" and "Google Flow - Aug 04, 05:42 PM - Opera", so the bit
+; after the last dash is the app itself. Nothing after a dash? Use the exe.
 NameFromWindow(title, exe) {
-    title := Trim(title)
-    bits  := StrSplit(title, " - ")
-    pick  := ""
-    if IsBrowser(exe) {
-        ; Everything up to the browser's own name is the page. Don't take just
-        ; the last piece of it — "Google Flow - Aug 04, 05:42 PM - Opera" would
-        ; come back called "Aug 04, 05:42 PM".
-        pick := (bits.Length > 1)
-            ? Trim(SubStr(title, 1, InStr(title, " - ", , -1) - 1))
-            : title                         ; a web app titled just "T3 Chat"
-    } else if (bits.Length > 1)             ; an empty title splits into nothing,
-        pick := Trim(bits[bits.Length])     ; so never reach into bits blind
+    bits := StrSplit(Trim(title), " - ")
+    pick := (bits.Length > 1)               ; an empty title splits into nothing,
+        ? Trim(bits[bits.Length])           ; so never reach into bits blind
+        : ""
     return pick != "" ? pick : RegExReplace(exe, "i)\.exe$", "")
 }
 
-; Browsers need the title in the match as well: every tab and web app shares
-; one exe, so "ahk_exe chrome.exe" alone would find whichever tab was last open.
-MatchFor(name, exe) => IsBrowser(exe) ? name " ahk_exe " exe : "ahk_exe " exe
+; Always the exe, browsers included. Pinning a browser to one tab's title
+; meant it stopped matching the moment that tab's title changed — and what
+; you want is the browser, showing whatever tab you're on.
+MatchFor(name, exe) => "ahk_exe " exe
 
 ; Everything we can work out about a window on our own. Enter defaults to on
 ; because most things you send to are a chat box — flip it on the row if not.
@@ -794,19 +784,32 @@ ComposerSend(*) {
     CloseComposer()                   ; get our window out of the way first
     if (!items.Length && Trim(note) = "")
         return
-    if !FocusTarget()
+    if !FocusTarget() {
+        ; Couldn't get to the app, so nothing was sent — put everything back
+        ; rather than quietly binning what you spent a minute collecting.
+        CompItems := items, CompNote := note
+        UpdateTrayTip()
+        ShowComposer(prev)
         return
+    }
     for it in items {
         A_Clipboard := it.data        ; put that exact grab back on the clipboard
-        Sleep(60)
+        ; Wait for it to actually land. A fixed sleep was a race, and losing it
+        ; meant Ctrl+V arrived at an empty clipboard — which is where those
+        ; "Nothing to paste from the clipboard" toasts came from.
+        if !ClipWait(4, 1) {          ; 1 = images count as something
+            Log("clipboard never came back for: " it.label)
+            continue
+        }
         Send("^v")
         Sleep(it.wait)                ; images especially need a moment to attach
     }
     if (Trim(note) != "") {
         A_Clipboard := note
-        ClipWait(2)
-        Send("^v")
-        Sleep(120)
+        if ClipWait(4, 1) {
+            Send("^v")
+            Sleep(120)
+        }
     }
     if EnterOK() {                    ; you clicked Send, so we always send —
         Send("{Enter}")               ; unless it's Word and Enter means nothing
@@ -1139,9 +1142,10 @@ ShowSettings(*) {
         Round(ed, 8)
         g.SetFont("s8 c" t.dim)
         g.Add("Text", "xm y+4 w" W, RegExMatch(hint, "i)^ahk_exe\s")
-            ? "Call it whatever you like."
-            : "Keep this to a short bit of its title bar — it's how the window"
-            . " is found, so a whole page title stops matching tomorrow.")
+            ? "Call it whatever you like — it's found by its program, so the"
+            . " name is just a label."
+            : "Keep this to a short bit of its title bar — this one has no"
+            . " program behind it, so the name is how the window is found.")
         g.SetFont("s10 c" t.text)
     }
 

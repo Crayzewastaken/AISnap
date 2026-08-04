@@ -96,16 +96,16 @@ Check(NameFromWindow("a - b - Visual Studio Code", "Code.exe") = "Visual Studio 
                                                                 "the last dash wins")
 Check(NameFromWindow("Claude", "Claude.exe") = "Claude",        "no dash falls back to the exe")
 Check(NameFromWindow("", "WINWORD.EXE") = "WINWORD",            "no title at all still names it")
-; browsers are backwards — the last bit is the browser, not the app you want
-Check(NameFromWindow("T3 Chat - Google Chrome", "chrome.exe") = "T3 Chat",
-                                                                "a tab is named after the page")
-Check(NameFromWindow("Google Flow - Aug 04, 05:42 PM - Opera", "opera.exe")
-        = "Google Flow - Aug 04, 05:42 PM",                     "the WHOLE page title, not its tail")
-Check(NameFromWindow("T3 Chat", "chrome.exe") = "T3 Chat",      "a web app with no dash keeps its name")
+; a browser is named after the browser and found by it, so it opens on
+; whatever tab you're actually on rather than one frozen page title
+Check(NameFromWindow("T3 Chat - Google Chrome", "chrome.exe") = "Google Chrome",
+                                                                "a browser is named after itself")
+Check(NameFromWindow("Google Flow - Aug 04, 05:42 PM - Opera", "opera.exe") = "Opera",
+                                                                "however busy the page title is")
 Check(NameFromWindow("", "chrome.exe") = "chrome",              "a nameless browser window still names it")
 Check(MatchFor("Excel", "EXCEL.EXE") = "ahk_exe EXCEL.EXE",     "an app matches on its exe")
-Check(MatchFor("T3 Chat", "chrome.exe") = "T3 Chat ahk_exe chrome.exe",
-                                                                "a browser tab matches the title too")
+Check(MatchFor("anything at all", "opera.exe") = "ahk_exe opera.exe",
+                                                                "and so does a browser, whatever it's called")
 
 ; the picker must offer the app you're looking at, and never the shell
 open := RunningApps()
@@ -130,9 +130,9 @@ Check(TargetAfterRemove("Claude", "Claude") = "Auto",           "the pinned app 
 Check(TargetAfterRemove("Claude", "ChatGPT") = "Claude",        "removing another app leaves it alone")
 Check(TargetAfterRemove("Auto", "Claude") = "Auto",             "Auto stays Auto")
 
-; renaming in place: a browser's name is part of its match, so it has to move
-Check(RematchFor("Web Gecko", "Web Gecko - Google Search ahk_exe opera.exe")
-        = "Web Gecko ahk_exe opera.exe",       "renaming a tab rebuilds its match")
+; renaming in place — and an old entry pinned to one tab's title gets healed
+Check(RematchFor("Opera", "Web Gecko - Google Search ahk_exe opera.exe")
+        = "ahk_exe opera.exe",                 "renaming drops a stale title match")
 Check(RematchFor("Chat", "ahk_exe Claude.exe") = "ahk_exe Claude.exe",
                                                "renaming an ordinary app leaves the match")
 Check(RematchFor("Word 365", "Word") = "Word 365",
