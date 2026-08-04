@@ -66,4 +66,28 @@ Check(ThemeNow().accent = Themes()["Claude Code"].accent, "unknown theme falls b
 CloseComposer()
 Check(Comp = 0 && CompItems.Length = 0 && CompNote = "", "close clears everything")
 
+; --- sending to any app, not just AI chats ---------------------------------
+; A chat needs Enter to fire the message; Word would just get a blank line.
+tmp := A_ScriptDir "\test-apps.ini"
+try FileDelete(tmp)
+FileAppend("[Apps]`n"
+         . "Chatty = ahk_exe chat.exe | chat.exe | 1`n"
+         . "Wordy = Word | C:\word.lnk | 0`n"
+         . "Olde = ahk_exe old.exe`n", tmp)
+real := cfg, cfg := tmp
+picked := LoadApps()
+cfg := real
+try FileDelete(tmp)
+Check(picked.Length = 3,                               "three apps parsed")
+Check(picked[2].match = "Word" && picked[2].launch = "C:\word.lnk", "title match + .lnk launch")
+Check(picked[2].enter = "0",                           "document app keeps enter=0")
+Check(picked[3].enter = "1",                           "an old two-field line still sends Enter")
+
+LastApp := picked[1]
+Check(EnterOK(),                                       "chat app presses Enter")
+LastApp := picked[2]
+Check(!EnterOK(),                                      "document app does not press Enter")
+LastApp := 0
+Check(EnterOK(),                                       "unknown target still presses Enter")
+
 ExitApp(fails)

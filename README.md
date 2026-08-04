@@ -17,6 +17,8 @@ Want it to just fire straight through with no box? Untick *"Open the composer so
 You stay on your own screen the whole time — AI Snap flicks over to the AI app, drops the content, and flicks back. Every key is yours to change (see [Customising](#customising)).
 
 > Works with **Claude**, **ChatGPT**, **Antigravity** — and anything else you add. It uses the desktop apps you already have: no API key, no signup, nothing extra.
+>
+> Not just AI, either — point it at **Word**, **Excel**, **T3** or any other program on your PC and your snips land there instead. See [Sending to any app](#sending-to-any-app).
 
 By default it sends to **whichever supported app you used most recently**, so you can bounce between Claude and ChatGPT without changing a setting. You can also pin one.
 
@@ -24,6 +26,7 @@ By default it sends to **whichever supported app you used most recently**, so yo
 
 ## What's new
 
+- **Send it anywhere.** Settings → **Send to** → **Choose an app…** opens the normal Windows picker at your Start menu. Pick Word, Excel, Notepad, a browser, T3 — anything on the PC — and your snips go there instead. See [Sending to any app](#sending-to-any-app).
 - **A composer box.** Snip or copy and a little window pops up. Type a note, hit Enter, and it lands in your AI chat as one message.
 - **Stack things up.** Keep snipping and copying while it's open — a screenshot, a paragraph, another screenshot. It all goes across together, in order.
 - **Store button.** Not ready to send? Hit Store. It closes and keeps everything, including what you'd half-typed. Snip something two minutes later and it opens back up with your first grab still sitting there. Build a message over as long as you like, then send once.
@@ -138,22 +141,37 @@ Prefer editing by hand? Everything lives in **`config.ini`** (tray → **Edit co
 Hotkey symbols there: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key — so `!1` is Alt+1.
 (Heads up: Ctrl+Alt combos can clash with **AltGr** on some keyboards and silently do nothing — that's why the defaults are plain Alt.)
 
-### Adding another AI app
+### Sending to any app
+
+It doesn't have to be an AI. Open **Settings → Send to** and pick **Choose an app…** at the bottom of the list — the normal Windows picker opens at your Start menu, showing the app names you already know. Click **Word**, **Excel**, **Notepad**, a browser, **T3**, a game — whatever — and that's where your snips and text go from now on.
+
+It then asks one question: **press Enter after pasting?**
+
+- **Yes** for a chat box — Enter is what actually sends the message.
+- **No** for a document — Enter would just leave a blank line in your work.
+
+The app is saved straight away, so it's in the dropdown next time too, and **Auto** starts counting it as one of yours.
+
+> Some Microsoft Store apps don't show up in the Start menu folder. Browse to the app's `.exe` yourself (usually under `C:\Program Files`), or add it by hand below.
+
+### Adding one by hand
 
 Open `config.ini` and add a line under `[Apps]`:
 
 ```ini
-Name = window to look for | how to start it (optional)
+Name = window to look for | how to start it (optional) | press Enter? (optional)
 ```
 
 For example:
 
 ```ini
-Perplexity = ahk_exe Perplexity.exe | Perplexity.AI_abc123!App
+Perplexity = ahk_exe Perplexity.exe | Perplexity.AI_abc123!App | 1
+Excel = ahk_exe EXCEL.EXE | | 0
 ```
 
-- **Window to look for** is usually `ahk_exe TheApp.exe`. To find the exe name, open the app and check Task Manager → Details. You can also match on the window title, e.g. `Gemini ahk_exe chrome.exe` for a browser tab.
-- **How to start it** is either a full path to an `.exe`, or an app id — run `Get-StartApps` in PowerShell to list them. Leave it blank and AI Snap just won't auto-launch that one.
+- **Window to look for** is usually `ahk_exe TheApp.exe`. To find the exe name, open the app and check Task Manager → Details. You can also match on the window title, e.g. `Gemini ahk_exe chrome.exe` for a browser tab, or just `Word` to match `Report.docx - Word`.
+- **How to start it** is a full path to an `.exe` or `.lnk`, or an app id — run `Get-StartApps` in PowerShell to list them. Leave it blank and AI Snap just won't auto-launch that one.
+- **Press Enter?** is `1` for chat boxes, `0` for documents. Leave it out and it's `1`.
 
 Apps included out of the box: Claude, ChatGPT, ChatGPT Classic, Antigravity. Delete any you don't use.
 
@@ -176,8 +194,9 @@ If you'd rather not install AutoHotkey on every machine, right-click `ai-snap.ah
 
 ## Troubleshooting
 
-- **"No AI app found"** — make sure one of your AI apps is open, or check its entry under `[Apps]` in `config.ini` matches the real exe name.
+- **"No app found"** — make sure one of your apps is open, or check its entry under `[Apps]` in `config.ini` matches the real exe name.
 - **It sends to the wrong app** — open Settings and pin the one you want in the **Send to** dropdown instead of leaving it on Auto.
+- **It adds a blank line to my document** — that app is set to press Enter. Change its last field to `0` under `[Apps]` in `config.ini`, or re-add it with **Choose an app…** and answer **No**.
 - **"Nothing dictated"** — AI Snap waited 30s and never saw your push-to-talk key. Check Handy is running, and that the key in Settings matches Handy's.
 - **Dictation sends half a sentence** — raise `Wait` under `[Dictation]` in `config.ini`.
 - **The screenshot doesn't paste** — some apps are slow to attach the image. Raise `AttachWait` under `[Behavior]` in `config.ini` (400 ms by default), or just press the key again.

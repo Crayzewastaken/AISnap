@@ -15,6 +15,7 @@ InstallKeybdHook()                ; see keys even when another app swallows them
 
 ; --- settings (read from config.ini, with safe fallbacks) -------------------
 global Apps         := LoadApps()
+global LastApp      := 0          ; the app we last sent to — see EnterOK()
 global Active       := IniRead(cfg, "Target",   "Active",         "Auto")
 global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
 global AutoSend     := IniRead(cfg, "Behavior", "AutoSend",       "1")
@@ -193,20 +194,29 @@ PasteIntoAI(prev, settle) {
     GoBack(prev)
 }
 
-; Focus the AI app, press Enter, then hand focus back. (The manual send key.)
+; Focus the app, press Enter, then hand focus back. (The manual send key.)
 Post(prev) {
     KeyWait("Alt", "T1")
     if !FocusTarget()
         return
-    Send("{Enter}")
-    Sleep(80)
+    if EnterOK() {                    ; nothing to "send" in a document
+        Send("{Enter}")
+        Sleep(80)
+    }
     GoBack(prev)
 }
 
-; Press Enter — but only when auto-send is switched on.
+; Chat apps need Enter to fire the message off. Word or Excel would just get a
+; stray blank line, so anything added with "press Enter = no" skips it.
+EnterOK() {
+    global LastApp
+    return !LastApp || LastApp.enter != "0"
+}
+
+; Press Enter — but only when auto-send is on and the target actually wants it.
 Submit() {
     global AutoSend
-    if (AutoSend = "1") {
+    if (AutoSend = "1" && EnterOK()) {
         Log("submitting")
         Send("{Enter}")
         Sleep(80)
@@ -235,13 +245,15 @@ GoBack(prev) {
 ; Bring the target AI window to the front — whatever state it's in.
 ; Handles: focused, minimised, hidden to the tray, or not running at all.
 FocusTarget() {
+    global LastApp
     id := FindTarget()
     if !id {                                   ; nothing open — try launching one
         if !(app := AppToLaunch()) {
-            TrayTip("No AI app found",
-                    "Open one, or add it under [Apps] in config.ini.", 3)
+            TrayTip("No app found",
+                    "Open one, or pick it in Settings → Send to.", 3)
             return 0
         }
+        LastApp := app
         Launch(app)
         if !WinWait(app.match, , 15) {
             TrayTip("Couldn't open " app.name, "Check its entry in config.ini.", 3)
@@ -259,12 +271,15 @@ FocusTarget() {
 }
 
 ; Which window should we send to? Honours the pinned app, else picks the
-; supported app you used most recently (window Z-order = most recent first).
+; app you used most recently (window Z-order = most recent first).
+; Also remembers WHICH app we landed on, so we know whether to press Enter.
 FindTarget() {
-    global Apps, Active
+    global Apps, Active, LastApp
+    LastApp := 0
     if (Active != "Auto") {
         for a in Apps {
             if (a.name = Active) {
+                LastApp := a
                 DetectHiddenWindows(false)
                 if (id := WinExist(a.match))
                     return id
@@ -279,10 +294,13 @@ FindTarget() {
         owned := Map()
         for a in Apps
             for hwnd in WinGetList(a.match)
-                owned[hwnd] := true
-        for hwnd in WinGetList()                ; every window, most recent first
-            if owned.Has(hwnd)
+                owned[hwnd] := a
+        for hwnd in WinGetList() {              ; every window, most recent first
+            if owned.Has(hwnd) {
+                LastApp := owned[hwnd]
                 return hwnd
+            }
+        }
     }
     return 0
 }
@@ -307,7 +325,8 @@ Launch(app) {
     try Run(target)
 }
 
-; Read the [Apps] section into a list of {name, match, launch}.
+; Read the [Apps] section into a list of {name, match, launch, enter}.
+; Third field is optional: 0 = don't press Enter after pasting (documents).
 LoadApps() {
     global cfg
     apps := []
@@ -320,12 +339,42 @@ LoadApps() {
         name := Trim(SubStr(line, 1, eq - 1))
         bits := StrSplit(SubStr(line, eq + 1), "|")
         match := Trim(bits.Has(1) ? bits[1] : "")
+        ent   := Trim(bits.Has(3) ? bits[3] : "")
         if (match != "")
             apps.Push({ name:   name,
                         match:  match,
-                        launch: Trim(bits.Has(2) ? bits[2] : "") })
+                        launch: Trim(bits.Has(2) ? bits[2] : ""),
+                        enter:  (ent = "" ? "1" : ent) })
     }
     return apps
+}
+
+; Pick any program on this PC to send to — Word, Excel, a browser, anything.
+; Opens at the Start menu so you see the names you know, not a pile of .exe
+; files. Returns an app the same shape as an [Apps] line, or 0 if cancelled.
+ChooseApp() {
+    ; 3 = it has to be a real file. 32 = hand us the shortcut itself, not the
+    ; exe behind it — otherwise "Word" comes back as "WINWORD" and reads awful.
+    path := FileSelect(35, A_StartMenuCommon "\Programs\",
+                       "Choose an app to send to", "Programs (*.lnk; *.exe)")
+    if !path
+        return 0
+    name := RegExReplace(SubStr(path, InStr(path, "\", , -1) + 1), "\.(lnk|exe)$", "")
+    name := RegExReplace(name, "[=|]", "-")     ; those two would break config.ini
+    target := path
+    if (SubStr(path, -4) = ".lnk")
+        try FileGetShortcut(path, &target)      ; shortcuts point at the real exe
+    ; Match on the exe where we can. Store apps have no exe behind the shortcut,
+    ; so fall back to matching the app's name inside the window title —
+    ; "Word" finds "Report.docx - Word" because partial titles already match.
+    match := (target != "" && SubStr(target, -4) = ".exe")
+        ? "ahk_exe " SubStr(target, InStr(target, "\", , -1) + 1)
+        : name
+    yes := MsgBox("Press Enter after pasting into " name "?`n`n"
+                . "Yes — it's a chat box, Enter sends the message.`n"
+                . "No — it's a document, Enter would just add a blank line.",
+                  "AI Snap", "YesNo Iconi") = "Yes"
+    return { name: name, match: match, launch: path, enter: yes ? "1" : "0" }
 }
 
 ; Write a line to ai-snap.log when Debug=1 in config.ini.
@@ -582,8 +631,10 @@ ComposerSend(*) {
         Send("^v")
         Sleep(120)
     }
-    Send("{Enter}")                   ; you clicked Send, so we always send
-    Sleep(80)
+    if EnterOK() {                    ; you clicked Send, so we always send —
+        Send("{Enter}")               ; unless it's Word and Enter means nothing
+        Sleep(80)
+    }
     GoBack(prev)
 }
 
@@ -648,11 +699,15 @@ ShowSettings(*) {
     names := ["Auto — whichever app I used last"]
     for a in Apps
         names.Push(a.name)
+    names.Push("Choose an app…")            ; always the last row — see PickApp
     ddTarget := g.Add("DropDownList", "x+6 yp-4 w240 -E0x200 Background" t.panel " c" t.text, names)
     ddTarget.Choose(1)
     for i, a in Apps
         if (a.name = Active)
             ddTarget.Choose(i + 1)
+    pickRow  := names.Length                ; where "Choose an app…" sits
+    prevPick := ddTarget.Value              ; what to go back to if you cancel
+    ddTarget.OnEvent("Change", PickApp)
 
     g.Add("Text", "xm y+10", "Look:")
     ddTheme := g.Add("DropDownList", "x+6 yp-4 w240 -E0x200 Background" t.panel " c" t.text,
@@ -696,6 +751,26 @@ ShowSettings(*) {
     for c in [ddTarget, ddTheme, hkDict, hkSnip, hkSel, hkAll, hkPost, edDictKey]
         Round(c, 6)
     g.Show()
+
+    ; "Choose an app…" opens the Windows picker, then slots the app you chose
+    ; into the list above itself and selects it. Saved to config.ini straight
+    ; away, so it's there next time even if you hit Cancel on this window.
+    PickApp(*) {
+        if (ddTarget.Value != pickRow) {
+            prevPick := ddTarget.Value
+            return
+        }
+        ddTarget.Choose(prevPick)               ; never leave "Choose an app…" showing
+        if !(app := ChooseApp())
+            return
+        Apps.Push(app)
+        IniWrite(app.match " | " app.launch " | " app.enter, cfg, "Apps", app.name)
+        ddTarget.Delete(pickRow)                ; re-add it under the new name
+        ddTarget.Add([app.name, "Choose an app…"])
+        prevPick := pickRow
+        pickRow  += 1
+        ddTarget.Choose(prevPick)
+    }
 
     Save(*) {
         for hk in [hkDict, hkSnip, hkSel, hkAll, hkPost] {
