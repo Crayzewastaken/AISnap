@@ -266,8 +266,67 @@ FocusTarget() {
     WinShow("ahk_id " id)                       ; un-hide if it was in the tray
     WinActivate("ahk_id " id)
     ok := WinWaitActive("ahk_id " id, , 3)
+    if ok
+        GiveFocus(id)
     Log("FocusTarget id=" id " activated=" (ok ? "yes" : "no"))
     return ok
+}
+
+; Being the front window isn't the same as being able to receive a keystroke.
+; A Chromium browser comes to the front with NO child holding the keyboard
+; focus, so Ctrl+V goes precisely nowhere — which is what "it doesn't work in
+; the browser" turned out to be. Hand focus to the biggest visible child,
+; which is the page itself rather than a background tab or a scrollbar.
+GiveFocus(id) {
+    try {
+        if ControlGetFocus("ahk_id " id)
+            return                              ; something already has it
+    }
+    ; Biggest wins, so we land on the page rather than a scrollbar — but only
+    ; if it actually takes the focus. Chromium's "Intermediate D3D Window" is
+    ; the largest child by far and is a drawing surface that silently refuses,
+    ; so asking isn't enough: check afterwards and move on if it didn't stick.
+    best := 0, bestArea := 0
+    for hwnd in WinGetControlsHwnd("ahk_id " id) {
+        try {
+            if !DllCall("IsWindowVisible", "ptr", hwnd)
+                continue
+            ControlGetPos(, , &w, &h, hwnd)
+            if (w * h <= bestArea)
+                continue
+            ControlFocus(hwnd)
+            if ControlGetFocus("ahk_id " id)
+                best := hwnd, bestArea := w * h
+        }
+    }
+    if best {
+        try ControlFocus(best)
+        Log("keyboard focus → " best " (" bestArea " px)")
+    } else
+        Log("nothing in " id " would take the keyboard focus")
+}
+
+; WinExist hands back whatever is topmost, and for a browser that can be a
+; tooltip or a half-built popup that lives for a few hundred milliseconds.
+; Take the first one you could actually type into instead.
+FindWindow(match) {
+    for hwnd in WinGetList(match) {
+        try {
+            if (WinGetTitle("ahk_id " hwnd) = "")
+                continue
+            ; Only judge size on a window that's actually up — minimised and
+            ; tray-hidden windows report nonsense, and those are the ones we
+            ; most want to find.
+            if (WinGetMinMax("ahk_id " hwnd) = 0
+                && DllCall("IsWindowVisible", "ptr", hwnd)) {
+                WinGetPos(, , &w, &h, "ahk_id " hwnd)
+                if (w < 200 || h < 200)
+                    continue
+            }
+            return hwnd
+        }
+    }
+    return 0
 }
 
 ; Which window should we send to? Honours the pinned app, else picks the
@@ -281,10 +340,10 @@ FindTarget() {
             if (a.name = Active) {
                 LastApp := a
                 DetectHiddenWindows(false)
-                if (id := WinExist(a.match))
+                if (id := FindWindow(a.match))
                     return id
                 DetectHiddenWindows(true)       ; also catch tray-hidden windows
-                return WinExist(a.match)
+                return FindWindow(a.match)
             }
         }
     }
@@ -293,7 +352,7 @@ FindTarget() {
         DetectHiddenWindows(hidden)
         owned := Map()
         for a in Apps
-            for hwnd in WinGetList(a.match)
+            if (hwnd := FindWindow(a.match))    ; a real window, not a tooltip
                 owned[hwnd] := a
         for hwnd in WinGetList() {              ; every window, most recent first
             if owned.Has(hwnd) {
