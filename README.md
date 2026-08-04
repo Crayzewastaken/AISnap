@@ -145,7 +145,9 @@ Hotkey symbols there: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key — 
 
 It doesn't have to be an AI. Open **Settings → Send to** — the bottom two rows add an app instead of picking one.
 
-**Click an app to add it…** — the easy one. The settings window gets out of the way, you click the app on your taskbar (or alt-tab to it, however you like), and whatever you land on is the one. Works for **Word**, **Excel**, a browser tab, **T3**, a game — anything that's open. Press **Esc** if you change your mind.
+**Click an app to add it…** — the easy one. The settings window gets out of the way, you click the app on your taskbar — or click its window, or alt-tab to it — and whatever you land on is the one. Works for **Word**, **Excel**, a browser tab, **T3**, a game — anything that's open. Press **Esc** if you change your mind, and it gives up on its own after 20 seconds.
+
+Clicking works even when that app is already the one in front, which it usually is: putting the settings window away hands focus straight back to whatever you were just doing.
 
 **Choose an app…** — for apps that aren't running. Opens the normal Windows picker at your Start menu, showing the names you already know.
 

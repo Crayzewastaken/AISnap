@@ -135,9 +135,26 @@ if WinWait("ahk_class Notepad", , 10) {
     Check(GrabNextWindow(WinActive("A")) = np,          "picks up the window you switch to")
     Check(NameFromWindow(WinGetTitle("ahk_id " np), "Notepad.exe") = "Notepad",
                                                         "and names it sensibly")
+
     try WinClose("ahk_id " np)
 } else {
     Check(false, "could not open Notepad to test with")
+}
+
+; The one that actually bit: hiding the settings box hands focus straight back
+; to the app you were about to click, so nothing ever "changes" and we waited
+; forever. A click has to count on its own, even on the window already in front.
+;
+; The flag is set directly rather than by a fake click — a scripted click can't
+; be relied on to take the foreground, so it lands on whatever really is on top
+; and the test measures Windows' focus rules instead of ours.
+Clicked() {
+    global ClickSeen
+    ClickSeen := true
+}
+if (here := WinActive("A")) {
+    SetTimer(Clicked, -300)
+    Check(GrabNextWindow(here) = here,     "a click counts on the window you're already in")
 }
 
 ExitApp(fails)

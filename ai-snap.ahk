@@ -394,47 +394,76 @@ ClickApp(g) {
     g.Hide()
     Sleep(250)                          ; let focus settle on whatever was behind
     start := WinActive("A")
+    Log("click-pick: waiting, focus is on " start)
     TrayTip("Click the app you want",
-            "Whatever you switch to next becomes the target. Esc to give up.", 1)
+            "Click it on your taskbar. Esc to give up.", 1)
     id := GrabNextWindow(start)
     g.Show()
-    if !id
+    if !id {
+        Log("click-pick: nothing picked")
+        TrayTip("Nothing picked", "Nothing was clicked, so nothing changed.", 2)
         return 0
+    }
+    Log("click-pick: got " id " — " WinGetTitle("ahk_id " id))
     return AppFromWindow(id)
 }
 
-; Wait for you to switch windows — taskbar, alt-tab, however you like.
+; Wait for you to click an app — taskbar, the window itself, or alt-tab.
 ; Returns the window you landed on, or 0 if you gave up or wandered off.
-; ponytail: a 150ms poll, not a shell hook. Twenty seconds of this is free.
-; It takes the first window you land on, so an app that steals focus on its
-; own could jump the queue — that's what the "call it what?" box is for: the
-; name tells you what we grabbed, and Cancel throws it away.
+;
+; A click always counts, even when it lands on the window that already had
+; focus: hiding the settings box hands focus straight back to whatever was
+; behind it, which is usually the very app you're about to click.
+; Without a click we need the active window to have changed, otherwise focus
+; drifting on its own (a notification, an app starting up) would count as a pick.
+;
+; ponytail: a 150ms poll to watch the active window, plus one temporary hotkey
+; to catch the click. A click is over in a few milliseconds, so polling on its
+; own walks straight past one — that was the bug.
+global ClickSeen := false
+
+NoteClick(*) {
+    global ClickSeen
+    ClickSeen := true
+}
+
 GrabNextWindow(start) {
+    global ClickSeen
     me := DllCall("GetCurrentProcessId")
-    Loop 133 {                                       ; ~20 seconds, then give up
-        Sleep(150)
-        if GetKeyState("Escape", "P")
-            return 0
-        try {
-            if !(id := WinActive("A")) || (id = start)
-                continue
-            if (WinGetPID("ahk_id " id) = me)        ; our own windows don't count
-                continue
-            if (WinGetTitle("ahk_id " id) = "")      ; nameless helper windows
-                continue
-            ; the taskbar, the desktop and the Start menu aren't apps
-            if (WinGetClass("ahk_id " id) ~= "^(Shell_TrayWnd|Shell_SecondaryTrayWnd"
-                                           . "|Progman|WorkerW|NotifyIconOverflowWindow"
-                                           . "|TaskListThumbnailWnd)$")
-                continue
-            if (WinGetProcessName("ahk_id " id) ~= "i)^(StartMenuExperienceHost"
-                                                 . "|SearchHost|ShellExperienceHost"
-                                                 . "|TextInputHost)\.exe$")
-                continue
-            return id
-        }                                            ; window vanished mid-check
+    ClickSeen := false
+    Hotkey("~LButton Up", NoteClick, "On")     ; "~" = your click still gets through
+    try {
+        Loop 133 {                                       ; ~20 seconds, then give up
+            Sleep(150)
+            if GetKeyState("Escape", "P")
+                return 0
+            if (clicked := ClickSeen) {
+                ClickSeen := false
+                Sleep(350)                               ; let the window come up
+            }
+            try {
+                if !(id := WinActive("A")) || (!clicked && id = start)
+                    continue
+                if (WinGetPID("ahk_id " id) = me)        ; our own windows don't count
+                    continue
+                if (WinGetTitle("ahk_id " id) = "")      ; nameless helper windows
+                    continue
+                ; the taskbar, the desktop and the Start menu aren't apps
+                if (WinGetClass("ahk_id " id) ~= "^(Shell_TrayWnd|Shell_SecondaryTrayWnd"
+                                               . "|Progman|WorkerW|NotifyIconOverflowWindow"
+                                               . "|TaskListThumbnailWnd)$")
+                    continue
+                if (WinGetProcessName("ahk_id " id) ~= "i)^(StartMenuExperienceHost"
+                                                     . "|SearchHost|ShellExperienceHost"
+                                                     . "|TextInputHost)\.exe$")
+                    continue
+                return id
+            }                                            ; window vanished mid-check
+        }
+        return 0
     }
-    return 0
+    finally
+        Hotkey("~LButton Up", NoteClick, "Off")
 }
 
 IsBrowser(exe) => exe ~= "i)^(chrome|msedge|firefox|brave|opera|vivaldi)\.exe$"
