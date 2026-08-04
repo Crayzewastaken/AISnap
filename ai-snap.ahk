@@ -305,13 +305,17 @@ FindTarget() {
     return 0
 }
 
-; In Auto mode, if nothing is open, launch the first app that knows how.
+; Nothing open? Work out what to start. Pinned to one app means that app or
+; nothing — starting a different one behind your back would be a nasty surprise.
 AppToLaunch() {
     global Apps, Active
-    for a in Apps
-        if (a.name = Active && a.launch != "")
-            return a
-    for a in Apps
+    if (Active != "Auto") {
+        for a in Apps
+            if (a.name = Active)
+                return a.launch != "" ? a : 0
+        return 0
+    }
+    for a in Apps                       ; Auto — the first one that knows how
         if (a.launch != "")
             return a
     return 0
@@ -359,8 +363,8 @@ ChooseApp() {
                        "Choose an app to send to", "Programs (*.lnk; *.exe)")
     if !path
         return 0
-    name := RegExReplace(SubStr(path, InStr(path, "\", , -1) + 1), "\.(lnk|exe)$", "")
-    name := RegExReplace(name, "[=|]", "-")     ; those two would break config.ini
+    name := CleanName(RegExReplace(SubStr(path, InStr(path, "\", , -1) + 1),
+                                   "\.(lnk|exe)$", ""))
     target := path
     if (SubStr(path, -4) = ".lnk")
         try FileGetShortcut(path, &target)      ; shortcuts point at the real exe
@@ -370,11 +374,106 @@ ChooseApp() {
     match := (target != "" && SubStr(target, -4) = ".exe")
         ? "ahk_exe " SubStr(target, InStr(target, "\", , -1) + 1)
         : name
-    yes := MsgBox("Press Enter after pasting into " name "?`n`n"
+    return { name: name, match: match, launch: path, enter: AskEnter(name) }
+}
+
+; The one thing we can't work out for ourselves: is this a chat box or a
+; document? Enter sends a message in one and ruins your paragraph in the other.
+AskEnter(name) {
+    return MsgBox("Press Enter after pasting into " name "?`n`n"
                 . "Yes — it's a chat box, Enter sends the message.`n"
                 . "No — it's a document, Enter would just add a blank line.",
-                  "AI Snap", "YesNo Iconi") = "Yes"
-    return { name: name, match: match, launch: path, enter: yes ? "1" : "0" }
+                  "AI Snap", "YesNo Iconi") = "Yes" ? "1" : "0"
+}
+
+; ---- picking an app by clicking it ------------------------------------------
+; Easier than hunting through the Start menu: get our window out of the way,
+; you click the app on your taskbar, and whatever you land on becomes the
+; target. Only works for apps that are already open, which is the usual case.
+ClickApp(g) {
+    g.Hide()
+    Sleep(250)                          ; let focus settle on whatever was behind
+    start := WinActive("A")
+    TrayTip("Click the app you want",
+            "Whatever you switch to next becomes the target. Esc to give up.", 1)
+    id := GrabNextWindow(start)
+    g.Show()
+    if !id
+        return 0
+    return AppFromWindow(id)
+}
+
+; Wait for you to switch windows — taskbar, alt-tab, however you like.
+; Returns the window you landed on, or 0 if you gave up or wandered off.
+; ponytail: a 150ms poll, not a shell hook. Twenty seconds of this is free.
+; It takes the first window you land on, so an app that steals focus on its
+; own could jump the queue — that's what the "call it what?" box is for: the
+; name tells you what we grabbed, and Cancel throws it away.
+GrabNextWindow(start) {
+    me := DllCall("GetCurrentProcessId")
+    Loop 133 {                                       ; ~20 seconds, then give up
+        Sleep(150)
+        if GetKeyState("Escape", "P")
+            return 0
+        try {
+            if !(id := WinActive("A")) || (id = start)
+                continue
+            if (WinGetPID("ahk_id " id) = me)        ; our own windows don't count
+                continue
+            if (WinGetTitle("ahk_id " id) = "")      ; nameless helper windows
+                continue
+            ; the taskbar, the desktop and the Start menu aren't apps
+            if (WinGetClass("ahk_id " id) ~= "^(Shell_TrayWnd|Shell_SecondaryTrayWnd"
+                                           . "|Progman|WorkerW|NotifyIconOverflowWindow"
+                                           . "|TaskListThumbnailWnd)$")
+                continue
+            if (WinGetProcessName("ahk_id " id) ~= "i)^(StartMenuExperienceHost"
+                                                 . "|SearchHost|ShellExperienceHost"
+                                                 . "|TextInputHost)\.exe$")
+                continue
+            return id
+        }                                            ; window vanished mid-check
+    }
+    return 0
+}
+
+IsBrowser(exe) => exe ~= "i)^(chrome|msedge|firefox|brave|opera|vivaldi)\.exe$"
+
+; Anything that would break a config.ini line, or turn it into a comment.
+CleanName(s) => RegExReplace(Trim(s), "[=|;\[\]]", "-")
+
+; What to call the app you clicked. Windows apps title their windows
+; "Book1 - Excel", so the bit after the last dash is the app itself.
+; Browsers are backwards: there the last bit is the browser and the bit before
+; it is the page you actually want — "T3 Chat - Google Chrome" → "T3 Chat".
+NameFromWindow(title, exe) {
+    bits := StrSplit(Trim(title), " - ")
+    pick := ""
+    if (bits.Length > 1)                    ; an empty title splits into nothing,
+        pick := Trim(IsBrowser(exe)         ; so never reach into bits blind
+                     ? bits[bits.Length - 1]
+                     : bits[bits.Length])
+    else if (bits.Length = 1 && IsBrowser(exe))
+        pick := Trim(bits[1])               ; a web app titled just "T3 Chat"
+    return pick != "" ? pick : RegExReplace(exe, "i)\.exe$", "")
+}
+
+; Browsers need the title in the match as well: every tab and web app shares
+; one exe, so "ahk_exe chrome.exe" alone would find whichever tab was last open.
+MatchFor(name, exe) => IsBrowser(exe) ? name " ahk_exe " exe : "ahk_exe " exe
+
+; Turn the window you clicked into an [Apps] entry, with a chance to rename it.
+AppFromWindow(id) {
+    exe  := WinGetProcessName("ahk_id " id)
+    path := ""
+    try path := WinGetProcessPath("ahk_id " id)     ; so we can reopen it later
+    ib := InputBox("What should this app be called?", "AI Snap", "w300 h130",
+                   NameFromWindow(WinGetTitle("ahk_id " id), exe))
+    if (ib.Result != "OK" || Trim(ib.Value) = "")
+        return 0
+    name := CleanName(ib.Value)
+    return { name: name, match: MatchFor(name, exe), launch: path,
+             enter: AskEnter(name) }
 }
 
 ; Write a line to ai-snap.log when Debug=1 in config.ini.
@@ -699,13 +798,14 @@ ShowSettings(*) {
     names := ["Auto — whichever app I used last"]
     for a in Apps
         names.Push(a.name)
-    names.Push("Choose an app…")            ; always the last row — see PickApp
+    names.Push("Click an app to add it…")   ; the last two rows add an app
+    names.Push("Choose an app…")            ; rather than pick one — see PickApp
     ddTarget := g.Add("DropDownList", "x+6 yp-4 w240 -E0x200 Background" t.panel " c" t.text, names)
     ddTarget.Choose(1)
     for i, a in Apps
         if (a.name = Active)
             ddTarget.Choose(i + 1)
-    pickRow  := names.Length                ; where "Choose an app…" sits
+    addRow   := names.Length - 1            ; where "Click an app…" sits
     prevPick := ddTarget.Value              ; what to go back to if you cancel
     ddTarget.OnEvent("Change", PickApp)
 
@@ -752,23 +852,26 @@ ShowSettings(*) {
         Round(c, 6)
     g.Show()
 
-    ; "Choose an app…" opens the Windows picker, then slots the app you chose
-    ; into the list above itself and selects it. Saved to config.ini straight
-    ; away, so it's there next time even if you hit Cancel on this window.
+    ; The two bottom rows add an app instead of picking one: "Click an app…"
+    ; waits for you to switch to it, "Choose an app…" opens the Windows picker.
+    ; Either way the new app is slotted in above them and selected. It's saved
+    ; to config.ini straight away, so it's there next time even if you Cancel.
     PickApp(*) {
-        if (ddTarget.Value != pickRow) {
+        if (ddTarget.Value < addRow) {
             prevPick := ddTarget.Value
             return
         }
-        ddTarget.Choose(prevPick)               ; never leave "Choose an app…" showing
-        if !(app := ChooseApp())
+        byClick := (ddTarget.Value = addRow)
+        ddTarget.Choose(prevPick)               ; never leave an "add" row showing
+        if !(app := byClick ? ClickApp(g) : ChooseApp())
             return
         Apps.Push(app)
         IniWrite(app.match " | " app.launch " | " app.enter, cfg, "Apps", app.name)
-        ddTarget.Delete(pickRow)                ; re-add it under the new name
-        ddTarget.Add([app.name, "Choose an app…"])
-        prevPick := pickRow
-        pickRow  += 1
+        ddTarget.Delete(addRow + 1)             ; drop both add rows, highest first,
+        ddTarget.Delete(addRow)                 ; then put them back under the new name
+        ddTarget.Add([app.name, "Click an app to add it…", "Choose an app…"])
+        prevPick := addRow
+        addRow   += 1
         ddTarget.Choose(prevPick)
     }
 

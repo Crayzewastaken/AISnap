@@ -26,7 +26,7 @@ By default it sends to **whichever supported app you used most recently**, so yo
 
 ## What's new
 
-- **Send it anywhere.** Settings → **Send to** → **Choose an app…** opens the normal Windows picker at your Start menu. Pick Word, Excel, Notepad, a browser, T3 — anything on the PC — and your snips go there instead. See [Sending to any app](#sending-to-any-app).
+- **Send it anywhere.** Settings → **Send to** → **Click an app to add it…**, then click the app on your taskbar. That's it — Word, Excel, a browser, T3, anything. Your snips go there from now on. See [Sending to any app](#sending-to-any-app).
 - **A composer box.** Snip or copy and a little window pops up. Type a note, hit Enter, and it lands in your AI chat as one message.
 - **Stack things up.** Keep snipping and copying while it's open — a screenshot, a paragraph, another screenshot. It all goes across together, in order.
 - **Store button.** Not ready to send? Hit Store. It closes and keeps everything, including what you'd half-typed. Snip something two minutes later and it opens back up with your first grab still sitting there. Build a message over as long as you like, then send once.
@@ -143,16 +143,22 @@ Hotkey symbols there: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key — 
 
 ### Sending to any app
 
-It doesn't have to be an AI. Open **Settings → Send to** and pick **Choose an app…** at the bottom of the list — the normal Windows picker opens at your Start menu, showing the app names you already know. Click **Word**, **Excel**, **Notepad**, a browser, **T3**, a game — whatever — and that's where your snips and text go from now on.
+It doesn't have to be an AI. Open **Settings → Send to** — the bottom two rows add an app instead of picking one.
 
-It then asks one question: **press Enter after pasting?**
+**Click an app to add it…** — the easy one. The settings window gets out of the way, you click the app on your taskbar (or alt-tab to it, however you like), and whatever you land on is the one. Works for **Word**, **Excel**, a browser tab, **T3**, a game — anything that's open. Press **Esc** if you change your mind.
 
-- **Yes** for a chat box — Enter is what actually sends the message.
-- **No** for a document — Enter would just leave a blank line in your work.
+**Choose an app…** — for apps that aren't running. Opens the normal Windows picker at your Start menu, showing the names you already know.
+
+Either way it asks you two things:
+
+1. **What should this be called?** — already filled in with its name, change it if you like.
+2. **Press Enter after pasting?** — **Yes** for a chat box, where Enter is what actually sends the message. **No** for a document, where Enter would just leave a blank line in your work.
 
 The app is saved straight away, so it's in the dropdown next time too, and **Auto** starts counting it as one of yours.
 
-> Some Microsoft Store apps don't show up in the Start menu folder. Browse to the app's `.exe` yourself (usually under `C:\Program Files`), or add it by hand below.
+> **Browser tabs and web apps** — clicking one gets you both the browser *and* its title, so `T3 Chat ahk_exe chrome.exe` finds that window and not whichever tab you had open last. Keep the name matching what's in the title bar.
+>
+> Some Microsoft Store apps don't show up in the Start menu folder. Click them instead, or browse to the `.exe` yourself.
 
 ### Adding one by hand
 

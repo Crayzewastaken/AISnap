@@ -90,4 +90,54 @@ Check(!EnterOK(),                                      "document app does not pr
 LastApp := 0
 Check(EnterOK(),                                       "unknown target still presses Enter")
 
+; --- naming an app you clicked on ------------------------------------------
+Check(NameFromWindow("Book1 - Excel", "EXCEL.EXE") = "Excel",   "name comes off the title")
+Check(NameFromWindow("a - b - Visual Studio Code", "Code.exe") = "Visual Studio Code",
+                                                                "the last dash wins")
+Check(NameFromWindow("Claude", "Claude.exe") = "Claude",        "no dash falls back to the exe")
+Check(NameFromWindow("", "WINWORD.EXE") = "WINWORD",            "no title at all still names it")
+; browsers are backwards — the last bit is the browser, not the app you want
+Check(NameFromWindow("T3 Chat - Google Chrome", "chrome.exe") = "T3 Chat",
+                                                                "a tab is named after the page")
+Check(NameFromWindow("a video - YouTube - Opera", "opera.exe") = "YouTube",
+                                                                "and not after the browser")
+Check(NameFromWindow("T3 Chat", "chrome.exe") = "T3 Chat",      "a web app with no dash keeps its name")
+Check(NameFromWindow("", "chrome.exe") = "chrome",              "a nameless browser window still names it")
+Check(MatchFor("Excel", "EXCEL.EXE") = "ahk_exe EXCEL.EXE",     "an app matches on its exe")
+Check(MatchFor("T3 Chat", "chrome.exe") = "T3 Chat ahk_exe chrome.exe",
+                                                                "a browser tab matches the title too")
+; (no space before the ; in that string — AHK reads " ;" as a comment even
+;  inside quotes, and eats the rest of the line)
+Check(CleanName(";Notes[1] = x|y ") = "-Notes-1- - x-y",        "config.ini's own syntax is stripped out")
+
+; pinned to an app that can't be launched must not start a different one
+Active := "Olde", Apps := picked        ; "Olde" is the line with no launch part
+Check(AppToLaunch() = 0,                               "a pinned app with no launch starts nothing")
+Active := "Auto"
+Check(AppToLaunch().name = "Chatty",                   "Auto still starts the first one that can")
+Apps := LoadApps()
+
+; --- waiting for you to click an app ---------------------------------------
+; Opens Notepad, minimises it, then "clicks" it a moment later. We must pick up
+; that exact window, ignoring the taskbar and our own windows on the way.
+; (No "grabs nothing when idle" check — Windows moves focus around on its own
+; when a script activates a window, so that one can't be tested honestly here.)
+Run("notepad.exe")
+if WinWait("ahk_class Notepad", , 10) {
+    np := WinExist("ahk_class Notepad")
+    WinMinimize("ahk_id " np)
+    Sleep(400)
+    ClickIt() {
+        WinRestore("ahk_id " np)
+        WinActivate("ahk_id " np)
+    }
+    SetTimer(ClickIt, -800)
+    Check(GrabNextWindow(WinActive("A")) = np,          "picks up the window you switch to")
+    Check(NameFromWindow(WinGetTitle("ahk_id " np), "Notepad.exe") = "Notepad",
+                                                        "and names it sensibly")
+    try WinClose("ahk_id " np)
+} else {
+    Check(false, "could not open Notepad to test with")
+}
+
 ExitApp(fails)
