@@ -129,6 +129,14 @@ Check(Pretty("^+#f4") = "Ctrl + Shift + Win + F4",              "modifiers come 
 Check(TargetAfterRemove("Claude", "Claude") = "Auto",           "the pinned app falls back to Auto")
 Check(TargetAfterRemove("Claude", "ChatGPT") = "Claude",        "removing another app leaves it alone")
 Check(TargetAfterRemove("Auto", "Claude") = "Auto",             "Auto stays Auto")
+
+; renaming in place: a browser's name is part of its match, so it has to move
+Check(RematchFor("Web Gecko", "Web Gecko - Google Search ahk_exe opera.exe")
+        = "Web Gecko ahk_exe opera.exe",       "renaming a tab rebuilds its match")
+Check(RematchFor("Chat", "ahk_exe Claude.exe") = "ahk_exe Claude.exe",
+                                               "renaming an ordinary app leaves the match")
+Check(RematchFor("Word 365", "Word") = "Word 365",
+                                               "an app matched by title alone follows the name")
 ; (no space before the ; in that string — AHK reads " ;" as a comment even
 ;  inside quotes, and eats the rest of the line)
 Check(CleanName(";Notes[1] = x|y ") = "-Notes-1- - x-y",        "config.ini's own syntax is stripped out")

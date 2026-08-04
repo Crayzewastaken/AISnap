@@ -531,22 +531,15 @@ AppFacts(id, exe := "") {
              exe: exe, title: WinGetTitle("ahk_id " id) }
 }
 
-AppFromWindow(id) => ConfirmName(AppFacts(id))
+AppFromWindow(id) => AppFacts(id)
 
-; A browser tab's name IS half its window match, and a page title is long and
-; changes as you browse — so that one's worth a look. Everything else we
-; already know for certain, so adding it is one click and no questions.
-ConfirmName(app) {
-    if !IsBrowser(app.exe)
-        return app
-    ib := InputBox("Call this what appears in the title bar — a short bit of it"
-                 . " is best, so it still matches tomorrow.",
-                   "AI Snap", "w340 h160", app.name)
-    if (ib.Result != "OK" || Trim(ib.Value) = "")
-        return 0
-    app.name  := CleanName(ib.Value)
-    app.match := MatchFor(app.name, app.exe)
-    return app
+; Renaming matters more than it looks. For a browser tab the name IS part of
+; the window match, so changing it has to rebuild the match with it. Pull the
+; exe back out of the old match rather than storing it twice.
+RematchFor(name, oldMatch) {
+    if !RegExMatch(oldMatch, "i)ahk_exe\s+(.+)$", &m)
+        return name                         ; this one matched on title alone
+    return MatchFor(name, Trim(m[1]))
 }
 
 ; Write a line to ai-snap.log when Debug=1 in config.ini.
@@ -873,6 +866,7 @@ global SetHead := 0        ; its heading, which you drag the card by
 global SetCtl  := Map()    ; the one free-text box, so we can read it back
 global SetPend := Map()    ; every setting as it stands, saved or not
 global SetTheme := ""      ; the theme as saved, while you try others on
+global SetFresh := false   ; just added an app — put the cursor in its name
 
 ; Everything editable in one Map, loaded once when the card first opens.
 ; Clicking a pill just changes a value in here and rebuilds, so what you see
@@ -897,9 +891,44 @@ SettingsState() {
 ; Build the card again with the list as it is now, keeping your unsaved edits.
 RefreshSettings() {
     global SetCtl, SetPend
-    for key, c in SetCtl                        ; the free-text box isn't a pill,
-        try SetPend[key] := c.Value             ; so its value has to be rescued
+    CommitRename()
+    for key, c in SetCtl {                      ; the free-text boxes aren't
+        if (key != "rename")                    ; pills, so their values have
+            try SetPend[key] := c.Value         ; to be rescued by hand
+    }
     ShowSettings()
+}
+
+; The selected app's name sits in an Edit right in the list, so it can be
+; fixed where you're looking at it. Clicking anything else commits it; Esc
+; walks away from it. Saved to config.ini at once, same as adding one.
+CommitRename() {
+    global SetCtl, SetPend, Apps, cfg, Active
+    if !SetCtl.Has("rename")
+        return
+    want := ""
+    try want := CleanName(SetCtl["rename"].Value)
+    was := SetPend["target"]
+    if (want = "" || want = was)
+        return
+    for a in Apps
+        if (a.name = want)                      ; that name's taken — leave it
+            return
+    for a in Apps {
+        if (a.name != was)
+            continue
+        IniDelete(cfg, "Apps", was)
+        a.match := RematchFor(want, a.match)
+        a.name  := want
+        IniWrite(a.match " | " a.launch " | " a.enter, cfg, "Apps", want)
+        if (Active = was) {
+            Active := want
+            IniWrite(want, cfg, "Target", "Active")
+        }
+        SetPend["target"] := want
+        Log("renamed " was " → " want " (" a.match ")")
+        return
+    }
 }
 
 ; Shut it and forget the unsaved edits, so next time reflects config.ini.
@@ -979,7 +1008,7 @@ Rebind(key, label) {
 
 ShowSettings(*) {
     global cfg, Apps, Theme, ThemeNames
-    global SetGui, SetHead, SetCtl, SetPend, SetTheme
+    global SetGui, SetHead, SetCtl, SetPend, SetTheme, SetFresh
     SettingsState()
     if SetGui {
         try SetGui.Destroy()
@@ -1047,6 +1076,13 @@ ShowSettings(*) {
 
     Round(ed, 8)
     g.Show()
+    ; Just added one? Land in its name box with the text selected, so a page
+    ; title that came out too long can be typed over straight away.
+    if (SetFresh && SetCtl.Has("rename")) {
+        SetCtl["rename"].Focus()
+        PostMessage(0xB1, 0, -1, SetCtl["rename"])       ; EM_SETSEL = select all
+    }
+    SetFresh := false
 
     ; A quiet all-caps label with breathing room above it. Cheaper than a rule
     ; line and it does the same job — it tells your eye a new group started.
@@ -1083,6 +1119,19 @@ ShowSettings(*) {
         e.ToolTip := "Press Enter after pasting`nOn for a chat box, off for a document"
         x := Pill("x+8 yp w32 h" RowH " Center", "✕", false, Dropper(idx), true)
         x.ToolTip := "Remove " name
+        if !picked
+            return
+        ; The one you've selected gets its name in a box, so a long or wrong
+        ; one can be fixed here instead of in a dialog you have to go and find.
+        SetCtl["rename"] := ed := g.Add("Edit",
+            "xm y+6 w" W " h28 -E0x200 Background" t.panel " c" t.text, name)
+        Round(ed, 8)
+        g.SetFont("s8 c" t.dim)
+        g.Add("Text", "xm y+4 w" W, RegExMatch(hint, "i)^ahk_exe\s")
+            ? "Call it whatever you like."
+            : "Keep this to a short bit of its title bar — it's how the window"
+            . " is found, so a whole page title stops matching tomorrow.")
+        g.SetFont("s10 c" t.text)
     }
 
     KeyRow(label, key) {
@@ -1129,6 +1178,7 @@ ShowSettings(*) {
 
     Save(*) {
         global SetCtl, SetPend, SetTheme, cfg
+        CommitRename()                          ; a half-typed name still counts
         SetPend["dictkey"] := Trim(SetCtl["dictkey"].Value)
         if (SetPend["dictkey"] = "") {
             MsgBox("Which key does your dictation app use?", "AI Snap", "Iconx 4096")
@@ -1154,7 +1204,7 @@ ShowSettings(*) {
 ; ---- what the app list's buttons do -----------------------------------------
 ; New apps are written to config.ini straight away, so they survive Cancel.
 AddApp(app) {
-    global Apps, cfg, SetPend
+    global Apps, cfg, SetPend, SetFresh
     for a in Apps {
         if (a.name = app.name) {                ; already there — just select it
             SetOne("target", a.name)
@@ -1164,6 +1214,7 @@ AddApp(app) {
     Apps.Push(app)
     IniWrite(app.match " | " app.launch " | " app.enter, cfg, "Apps", app.name)
     Log("added app " app.name " → " app.match)
+    SetFresh := true                            ; so the cursor lands in its name
     SetOne("target", app.name)
 }
 
@@ -1228,10 +1279,5 @@ ShowRunningApps() {
     p.OnEvent("Close",  (*) => p.Destroy())
     p.Show()
 
-    Take(app) => (*) => Chosen(app)
-    Chosen(app) {
-        p.Destroy()
-        if (app := ConfirmName(app))
-            AddApp(app)
-    }
+    Take(app) => (*) => (p.Destroy(), AddApp(app))
 }

@@ -27,7 +27,7 @@ By default it sends to **whichever supported app you used most recently**, so yo
 ## What's new
 
 - **Send it anywhere.** Settings now opens on your list of apps. Hit **Running apps**, click the one you want, and your snips go there from now on — Word, Excel, a browser, T3, anything. Or **Click an app** and just click it on your taskbar. See [Sending to any app](#sending-to-any-app).
-- **A settings card, not a dialog.** Same dark rounded look as the composer, and it follows your theme as you pick it. Your apps are a list you can add to, reorder your pick in, and remove from with a ✕ — no dropdown to hunt through.
+- **A settings card, not a dialog.** Same dark rounded look as the composer, and it follows your theme as you pick it. Your apps are a list you can add to, pick from and remove from with a ✕ — no dropdown to hunt through, and no pop-ups: the selected app's name is a box you type in, right there in the list.
 - **Keys read like keys.** They show as *Alt + 2*, and clicking one asks you to press the combo you want.
 - **A composer box.** Snip or copy and a little window pops up. Type a note, hit Enter, and it lands in your AI chat as one message.
 - **Stack things up.** Keep snipping and copying while it's open — a screenshot, a paragraph, another screenshot. It all goes across together, in order.
@@ -155,6 +155,8 @@ Three ways to add one:
 | **Click an app** | The card gets out of the way and you click the app on your taskbar. **Esc** to back out; it gives up after 20 seconds. |
 | **Browse…** | For apps that aren't running. The normal Windows picker, opened at your Start menu. |
 
+Nothing pops up — the app just appears in the list, selected, with its **name in a box you can type in right there**. Add one and the cursor is already in it with the name highlighted, so a page title that came out too long can be typed straight over. Click anything else and the new name is kept; press **Esc** and it isn't.
+
 Each app in the list has two more controls:
 
 - **Enter / no ↵** — click to flip it. **Enter** for a chat box, where Enter is what actually sends the message. **no ↵** for a document, where Enter would just leave a blank line in your work.
@@ -162,7 +164,7 @@ Each app in the list has two more controls:
 
 Apps are saved the moment you add them, so they're still there next time even if you hit Cancel.
 
-> **Browser tabs and web apps** get one extra question, because their name is also how the window is found — every tab shares one `chrome.exe`. Keep it to a short bit of the title bar that won't change, and you get `T3 Chat ahk_exe chrome.exe`, which finds that window and not whichever tab was open last. Everything else is added without asking anything.
+> **Browser tabs and web apps** are the one case where the name matters: every tab shares one `chrome.exe`, so the name is also how the window is found. Keep it to a short bit of the title bar that won't change — `Web Gecko`, not `Web Gecko - Google Search` — and you get `Web Gecko ahk_exe opera.exe`, which finds that window and not whichever tab was open last. The box tells you when this applies.
 >
 > Some Microsoft Store apps don't show up in the Start menu folder. Use **Running apps** or **Click an app** instead.
 
