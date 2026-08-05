@@ -22,6 +22,8 @@ try {
         FileAppend("captured`n", lg)
         ExitApp(0)
     } else {
+        if (which != "settings")
+            SetPage := which          ; "Keys", "Filling", "Options"
         ShowSettings()
         win := SetGui.Hwnd
     }

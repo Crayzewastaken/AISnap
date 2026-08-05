@@ -34,11 +34,37 @@ global CompEdit  := 0, CompHead := 0
 global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
 global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
 
+; --- fill mode (see the fill section further down) --------------------------
+global Filling     := false   ; armed: every copy lands and moves on
+global FillLast    := 0       ; when the last one landed, for the idle timeout
+global FillBadge   := 0       ; the little "filling" tag on screen
+global FillAdvance := IniRead(cfg, "Fill", "Advance", "Tab")
+global FillTimeout := SafeInt(IniRead(cfg, "Fill", "Timeout", "120"), 120)
+global ClipMine    := 0       ; >0 while WE are the ones using the clipboard
+
+; config.ini is a text file anyone can edit by hand, and a number that isn't
+; one blows up inside a timer where nobody sees the error.
+SafeInt(v, dflt) => IsInteger(v) ? Integer(v) : dflt
+
+; Fill mode reacts to every clipboard change. Our own snips, copies and
+; composer sends are clipboard changes too — hold it off while we work, or
+; an Alt+2 snip meant for your AI gets pasted into the spreadsheet as well.
+ClipHold() {
+    global ClipMine
+    ClipMine++
+}
+ClipRelease() {
+    global ClipMine
+    if (ClipMine > 0)
+        ClipMine--
+}
+
 keyDict := IniRead(cfg, "Hotkeys", "Dictate",        "!1")
 keySnip := IniRead(cfg, "Hotkeys", "SnipAndSend",    "!2")
 keySel  := IniRead(cfg, "Hotkeys", "CopySelection",  "!3")
 keyAll  := IniRead(cfg, "Hotkeys", "CopyAllOnPage",  "!4")
 keyPost := IniRead(cfg, "Hotkeys", "Post",           "!0")
+keyFill := IniRead(cfg, "Hotkeys", "Fill",           "!9")
 
 ; --- bind the hotkeys -------------------------------------------------------
 Hotkey(keyDict, DictateToAI)
@@ -46,6 +72,7 @@ Hotkey(keySnip, SnipAndSend)
 Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
+Hotkey(keyFill, ToggleFill)
 
 ; The little bot, instead of AutoHotkey's H. Missing icon isn't worth dying over.
 try TraySetIcon(A_ScriptDir "\ai-snap.ico")
@@ -130,18 +157,23 @@ SnipAndSend(*) {
     if Comp
         Comp.Hide()                   ; keep the composer out of your own screenshot
     KeyWait("Alt", "T1")              ; let go of Alt so the snip key isn't mangled
-    A_Clipboard := ""                 ; clear so we can detect the new snip
-    Send("#+s")                       ; Windows built-in "snip region to clipboard"
-    if !ClipWait(60, 1) {             ; wait up to 60s for the snip (1 = images too)
-        if Comp
-            ShowComposer(prev)        ; snip cancelled — put the box back
-        return
+    ClipHold()                        ; this snip is ours, not fill mode's
+    try {
+        A_Clipboard := ""             ; clear so we can detect the new snip
+        Send("#+s")                   ; Windows built-in "snip region to clipboard"
+        if !ClipWait(60, 1) {         ; wait up to 60s for the snip (1 = images too)
+            if Comp
+                ShowComposer(prev)    ; snip cancelled — put the box back
+            return
+        }
+        if (Composer = "1") {
+            Attach("Screenshot", prev, AttachWait)
+            return
+        }
+        PasteIntoAI(prev, AttachWait)
     }
-    if (Composer = "1") {
-        Attach("Screenshot", prev, AttachWait)
-        return
-    }
-    PasteIntoAI(prev, AttachWait)
+    finally
+        ClipRelease()
 }
 
 ; Copy whatever text is highlighted right now, then send it.
@@ -163,6 +195,103 @@ PostToAI(*) {
 }
 
 ; ============================================================================
+;  fill mode — copy, copy, copy, and it lands in the next cell each time
+;
+;  Press the fill key once and AI Snap starts watching your clipboard. Every
+;  time you copy anything, it goes into your chosen app and then presses Tab
+;  (or Enter, or whatever you set) to move on. Copy the next thing and it
+;  lands in the next cell. Transcribing an invoice into a spreadsheet stops
+;  being alt-tab, click, paste, alt-tab, click, paste.
+;
+;  It is armed until you say otherwise, so it says so on screen the whole
+;  time and stops on its own if you wander off.
+; ============================================================================
+ToggleFill(*) {
+    global Filling
+    Filling ? StopFill("you turned it off") : StartFill()
+}
+
+StartFill() {
+    global Filling, FillLast, FillAdvance
+    KeyWait("Alt", "T1")
+    if !FocusTarget() {              ; no point arming with nowhere to put it
+        TrayTip("Nothing to fill", "Open the app you want to fill first.", 2)
+        return
+    }
+    Filling := true, FillLast := A_TickCount
+    OnClipboardChange(FillPaste, 1)
+    Hotkey("~Escape", StopFillKey, "On")
+    SetTimer(FillWatch, 1000)
+    ShowFillBadge()
+    Log("fill armed, advance=" FillAdvance)
+}
+
+StopFillKey(*) => StopFill("you pressed Esc")
+
+StopFill(why) {
+    global Filling, FillBadge
+    if !Filling
+        return
+    Filling := false
+    OnClipboardChange(FillPaste, 0)
+    try Hotkey("~Escape", StopFillKey, "Off")
+    SetTimer(FillWatch, 0)
+    if FillBadge {
+        try FillBadge.Destroy()
+        FillBadge := 0
+    }
+    Log("fill stopped — " why)
+    TrayTip("Filling stopped", why, 1)
+}
+
+; Fires on every clipboard change while armed. Type is 0 when the clipboard
+; was emptied, which is what our own snip does before it grabs — ignore those.
+FillPaste(type) {
+    global Filling, FillLast, FillAdvance, ClipMine
+    if (!Filling || !type || ClipMine)
+        return
+    prev := WinActive("A")
+    if !FocusTarget() {
+        StopFill("couldn't reach the app")
+        return
+    }
+    FillLast := A_TickCount
+    Send("^v")
+    Sleep(90)
+    if (FillAdvance != "" && FillAdvance != "None")
+        Send("{" FillAdvance "}")
+    Sleep(40)
+    GoBack(prev)
+    Log("filled one, advanced with " FillAdvance)
+}
+
+; Armed and forgotten is how you paste into something you didn't mean to.
+FillWatch() {
+    global Filling, FillLast, FillTimeout
+    if (Filling && FillTimeout > 0
+        && (A_TickCount - FillLast) > FillTimeout * 1000)
+        StopFill("nothing copied for " FillTimeout "s")
+}
+
+; A small tag in the bottom corner. Being armed changes what every copy does,
+; so it should never be something you have to remember you switched on.
+ShowFillBadge() {
+    global FillBadge, FillAdvance, Active
+    t := ThemeNow()
+    FillBadge := g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x20", "AI Snap filling")
+    g.MarginX := 14, g.MarginY := 10          ; +E0x20 = clicks pass through it
+    ApplyTheme(g, t)
+    g.BackColor := t.accent
+    g.SetFont("s10 w600 c" t.accentText, t.font)
+    g.Add("Text", "xm ym", "● Filling " (Active = "Auto" ? "" : Active))
+    g.SetFont("s8 w400 c" t.accentText)
+    g.Add("Text", "xm y+2", "every copy lands, then " FillAdvance "  ·  Esc to stop")
+    g.Show("NoActivate AutoSize")
+    WinGetPos(, , &bw, &bh, "ahk_id " g.Hwnd)
+    g.Move(A_ScreenWidth - bw - 24, A_ScreenHeight - bh - 64)
+}
+
+; ============================================================================
 ;  shared helpers
 ; ============================================================================
 
@@ -171,17 +300,22 @@ GrabTextToAI(copyKeys, label) {
     global Comp, CompPrev, Composer
     prev := Comp ? CompPrev : WinActive("A")
     KeyWait("Alt", "T1")              ; release Alt or ^c becomes ^!c and fails
-    A_Clipboard := ""                 ; clear so we know when the copy lands
-    Send(copyKeys)                    ; the copy happens in YOUR window
-    if !ClipWait(2) {                 ; wait up to 2s for text
-        TrayTip("Nothing copied", "No text was selected to send.", 2)
-        return
+    ClipHold()                        ; this copy is ours, not fill mode's
+    try {
+        A_Clipboard := ""             ; clear so we know when the copy lands
+        Send(copyKeys)                ; the copy happens in YOUR window
+        if !ClipWait(2) {             ; wait up to 2s for text
+            TrayTip("Nothing copied", "No text was selected to send.", 2)
+            return
+        }
+        if (Composer = "1") {
+            Attach(label ": " Preview(A_Clipboard), prev, 120)
+            return
+        }
+        PasteIntoAI(prev, 120)
     }
-    if (Composer = "1") {
-        Attach(label ": " Preview(A_Clipboard), prev, 120)
-        return
-    }
-    PasteIntoAI(prev, 120)
+    finally
+        ClipRelease()
 }
 
 ; Focus the AI app, paste the clipboard, send it, then hand focus back.
@@ -711,12 +845,13 @@ ThemeNow() {
 }
 
 ; Dress a window: dark background, rounded corners, themed default font.
-;   +0x2000000  WS_CLIPCHILDREN — don't paint the background under the controls
-;   +E0x2000000 WS_EX_COMPOSITED — paint the whole window off-screen, once
-; Without these, a card with forty rounded controls flickers every time
-; anything asks it to redraw. Same number, two different style fields.
+; +0x2000000 is WS_CLIPCHILDREN — don't paint the window background under the
+; controls, which is half of why a card this busy used to flicker. (The other
+; half was the hover watcher repainting everything; see HoverCheck.)
+; Not WS_EX_COMPOSITED as well: it double-buffers, but it also drops children
+; that overlap a sibling, and every row in the settings card sits on a panel.
 ApplyTheme(g, t) {
-    g.Opt("+0x2000000 +E0x2000000")
+    g.Opt("+0x2000000")
     g.BackColor := t.bg
     g.SetFont("s10 c" t.text, t.font)
     ; 20 = dark title bar (for windows that still have one)
@@ -933,29 +1068,34 @@ ComposerSend(*) {
         ShowComposer(prev)
         return
     }
-    for it in items {
-        A_Clipboard := it.data        ; put that exact grab back on the clipboard
-        ; Wait for it to actually land. A fixed sleep was a race, and losing it
-        ; meant Ctrl+V arrived at an empty clipboard — which is where those
-        ; "Nothing to paste from the clipboard" toasts came from.
-        if !ClipWait(4, 1) {          ; 1 = images count as something
-            Log("clipboard never came back for: " it.label)
-            continue
-        }
-        Send("^v")
-        Sleep(it.wait)                ; images especially need a moment to attach
-    }
-    if (Trim(note) != "") {
-        A_Clipboard := note
-        if ClipWait(4, 1) {
+    ClipHold()                        ; every line below changes the clipboard,
+    try {                             ; and none of them are for fill mode
+        for it in items {
+            A_Clipboard := it.data    ; put that exact grab back on the clipboard
+            ; Wait for it to actually land. A fixed sleep was a race, and losing
+            ; it meant Ctrl+V arrived at an empty clipboard — which is where the
+            ; "Nothing to paste from the clipboard" toasts came from.
+            if !ClipWait(4, 1) {      ; 1 = images count as something
+                Log("clipboard never came back for: " it.label)
+                continue
+            }
             Send("^v")
-            Sleep(120)
+            Sleep(it.wait)            ; images especially need a moment to attach
+        }
+        if (Trim(note) != "") {
+            A_Clipboard := note
+            if ClipWait(4, 1) {
+                Send("^v")
+                Sleep(120)
+            }
+        }
+        if EnterOK() {                ; you clicked Send, so we always send —
+            Send("{Enter}")           ; unless it's Word and Enter means nothing
+            Sleep(80)
         }
     }
-    if EnterOK() {                    ; you clicked Send, so we always send —
-        Send("{Enter}")               ; unless it's Word and Enter means nothing
-        Sleep(80)
-    }
+    finally
+        ClipRelease()
     GoBack(prev)
 }
 
@@ -1021,6 +1161,13 @@ global SetCtl  := Map()    ; the one free-text box, so we can read it back
 global SetPend := Map()    ; every setting as it stands, saved or not
 global SetTheme := ""      ; the theme as saved, while you try others on
 global SetFresh := false   ; just added an app — put the cursor in its name
+global SetPage  := "Send to"   ; which sidebar page you're looking at
+
+TurnTo(page) {
+    global SetPage
+    SetPage := page
+    RefreshSettings()
+}
 
 ; Everything editable in one Map, loaded once when the card first opens.
 ; Clicking a pill just changes a value in here and rebuilds, so what you see
@@ -1036,10 +1183,13 @@ SettingsState() {
     SetPend["sel"]     := IniRead(cfg, "Hotkeys",   "CopySelection", "!3")
     SetPend["all"]     := IniRead(cfg, "Hotkeys",   "CopyAllOnPage", "!4")
     SetPend["post"]    := IniRead(cfg, "Hotkeys",   "Post",          "!0")
-    SetPend["dictkey"] := IniRead(cfg, "Dictation", "Key",           "F4")
-    SetPend["comp"]    := IniRead(cfg, "Behavior",  "Composer",      "1")
-    SetPend["auto"]    := IniRead(cfg, "Behavior",  "AutoSend",      "1")
-    SetPend["restore"] := IniRead(cfg, "Behavior",  "RestoreFocus",  "1")
+    SetPend["fill"]        := IniRead(cfg, "Hotkeys",   "Fill",          "!9")
+    SetPend["dictkey"]     := IniRead(cfg, "Dictation", "Key",           "F4")
+    SetPend["comp"]        := IniRead(cfg, "Behavior",  "Composer",      "1")
+    SetPend["auto"]        := IniRead(cfg, "Behavior",  "AutoSend",      "1")
+    SetPend["restore"]     := IniRead(cfg, "Behavior",  "RestoreFocus",  "1")
+    SetPend["advance"]     := IniRead(cfg, "Fill",      "Advance",       "Tab")
+    SetPend["filltimeout"] := IniRead(cfg, "Fill",      "Timeout",       "120")
 }
 
 ; Build the card again with the list as it is now, keeping your unsaved edits.
@@ -1161,7 +1311,7 @@ Rebind(key, label) {
 }
 
 ShowSettings(*) {
-    global cfg, Apps, Theme, ThemeNames
+    global cfg, Apps, Theme, ThemeNames, SetPage
     global SetGui, SetHead, SetCtl, SetPend, SetTheme, SetFresh
     SettingsState()
     if SetGui {
@@ -1173,63 +1323,64 @@ ShowSettings(*) {
         SetTheme := Theme                     ; Cancel has to be able to undo this
     Theme := SetPend["theme"]                 ; so the card repaints as you pick
     t := ThemeNow()
-    W := 412                                  ; content width everything lines up to
-    RowH := 34                                ; and one row height, everywhere
+
+    ; A sidebar down the left, one page at a time on the right. Everything
+    ; lines up to these and nothing anywhere else invents its own number.
+    SIDE := 172                               ; sidebar width
+    CX   := SIDE + 26                         ; where content starts
+    CW   := 452                               ; and how wide it is
+    RowH := 46                                ; one row in a card
+    PAGES := ["Send to", "Keys", "Filling", "Options"]
+    cardTop := 0, cardRow := 0, cardN := 0    ; the card the rows are landing in
+
     SetGui := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap settings")
-    g.MarginX := 20, g.MarginY := 18
+    g.MarginX := 0, g.MarginY := 0
     ApplyTheme(g, t)
 
-    ; ---- heading -----------------------------------------------------------
-    g.SetFont("s12 w600 c" t.text)
-    SetHead := g.Add("Text", "xm ym w" (W - 40) " +0x100", "AI Snap")   ; 0x100 = clickable
-    g.SetFont("s12 c" t.dim)
-    g.Add("Text", "x+0 yp-2 w32 h28 Center +0x200 +0x100 Background" t.bg, "✕")
-        .OnEvent("Click", (*) => CloseSettings())
-
-    ; ---- your apps ---------------------------------------------------------
-    Section("Send to")
-    Row("Auto", "whichever app I used last", "Auto")
-    for i, a in Apps
-        Row(a.name, a.match, a.name, i, a.enter)
-
-    g.SetFont("s10 c" t.text)
-    ThemeButton(g, t, "Running apps",  "xm y+12 w132 h" RowH, (*) => ShowRunningApps())
-    ThemeButton(g, t, "Click an app",  "x+8 w132 h" RowH,     PickByClick)
-    ThemeButton(g, t, "Browse…",       "x+8 w132 h" RowH,     PickByBrowse)
-
-    ; ---- keys --------------------------------------------------------------
-    Section("Keys")
-    KeyRow("Talk to my AI (dictation)",  "dict")
-    KeyRow("Snip screenshot → send",     "snip")
-    KeyRow("Send what I've highlighted", "sel")
-    KeyRow("Select all → send",          "all")
-    KeyRow("Send manually",              "post")
-
-    g.SetFont("s10 c" t.text)
-    g.Add("Text", "xm y+6 w" (W - 190) " h" RowH " +0x200", "My push-to-talk key")
-    SetCtl["dictkey"] := ed := g.Add("Edit",
-        "x+8 yp+3 w72 h28 Center -E0x200 Background" t.panel " c" t.text, SetPend["dictkey"])
+    ; ---- sidebar -----------------------------------------------------------
+    g.SetFont("s14 w700 c" t.accent, t.font)
+    SetHead := g.Add("Text", "x24 y22 w" (SIDE - 40) " +0x100", "AI Snap")
     g.SetFont("s8 c" t.dim)
-    g.Add("Text", "x+8 yp+6 w96", "as set in Handy")
+    g.Add("Text", "x24 y+2 w" (SIDE - 40), "snip · copy · send")
 
-    ; ---- look --------------------------------------------------------------
-    Section("Look")
-    Segment("theme", ThemeNames)
+    y := 74
+    for i, name in PAGES {
+        on := (SetPage = name)
+        nav := g.Add("Text", "x12 y" (y += 34) " w" (SIDE - 24) " h34 +0x200 +0x80"
+                   . " Background" (on ? t.panel : t.bg)
+                   . " c" (on ? t.text : t.dim), "    " name)
+        nav.OnEvent("Click", Pager(name))
+        Round(nav, 9)
+        if !on
+            Hover(nav, t.bg, t.panel)
+    }
 
-    ; ---- options -----------------------------------------------------------
-    Section("Options")
-    Toggle("comp",    "Ask me for a note first")
-    Toggle("auto",    "Send automatically")
-    Toggle("restore", "Come back to my window")
+    ; ---- the page ----------------------------------------------------------
+    g.SetFont("s11 w600 c" t.text)
+    g.Add("Text", "x" CX " y24 w" (CW - 40), StrUpper(SetPage))
+    g.SetFont("s8 c" t.dim)
+    cy := 52                                  ; running y for the content column
+
+    if (SetPage = "Send to")
+        PageApps()
+    else if (SetPage = "Keys")
+        PageKeys()
+    else if (SetPage = "Filling")
+        PageFill()
+    else
+        PageOptions()
 
     ; ---- save --------------------------------------------------------------
-    ThemeButton(g, t, "Save and reload", "xm y+18 w" (W - 140) " h40", Save, true)
-    ThemeButton(g, t, "Cancel", "x+8 w132 h40", (*) => CloseSettings())
+    cy += 12
+    ThemeButton(g, t, "Save and reload", "x" CX " y" cy " w" (CW - 132) " h40", Save, true)
+    ThemeButton(g, t, "Cancel", "x+8 w124 h40", (*) => CloseSettings())
+    g.SetFont("s12 c" t.dim)
+    g.Add("Text", "x" (CX + CW - 30) " y20 w30 h28 Center +0x200 +0x100 Background" t.bg, "✕")
+        .OnEvent("Click", (*) => CloseSettings())
+
     g.OnEvent("Escape", (*) => CloseSettings())
     g.OnEvent("Close",  (*) => CloseSettings())
-
-    Round(ed, 8)
-    g.Show()
+    g.Show("w" (CX + CW + 26) " h" (cy + 68))
     ; Just added one? Land in its name box with the text selected, so a page
     ; title that came out too long can be typed over straight away.
     if (SetFresh && SetCtl.Has("rename")) {
@@ -1237,84 +1388,206 @@ ShowSettings(*) {
         PostMessage(0xB1, 0, -1, SetCtl["rename"])       ; EM_SETSEL = select all
     }
     SetFresh := false
-    Log("settings card built")
+    Log("settings card built — page " SetPage)
 
-    ; A quiet all-caps label with breathing room above it. Cheaper than a rule
-    ; line and it does the same job — it tells your eye a new group started.
-    Section(label) {
-        g.SetFont("s8 w600 c" t.dim)
-        g.Add("Text", "xm y+18 w" W, StrUpper(label))
+    ; ---- the pages ---------------------------------------------------------
+    PageApps() {
+        Note("Click one to send there. Auto follows whichever you used last.")
+        Card(Apps.Length + 1)
+        AppRow("Auto", "whichever app I used last", "Auto")
+        for i, a in Apps
+            AppRow(a.name, a.match, a.name, i, a.enter)
+        g.SetFont("s10 c" t.text)
+        ThemeButton(g, t, "Running apps", "x" CX " y" cy " w" (CW // 3 - 6) " h38",
+                    (*) => ShowRunningApps())
+        ThemeButton(g, t, "Click an app", "x+8 yp w" (CW // 3 - 6) " h38", PickByClick)
+        ThemeButton(g, t, "Browse…",      "x+8 yp w" (CW // 3 - 6) " h38", PickByBrowse)
+        cy += 38 + 16
+
+        ; Whichever one you've selected gets its own card: the name where you
+        ; can fix it, and the spot it should click before typing.
+        for i, a in Apps {
+            if (a.name != SetPend["target"])
+                continue
+            Card(2)
+            y := RowTop()
+            Label(y, "Name")
+            SetCtl["rename"] := ed := g.Add("Edit",
+                "x" (CX + CW - 232) " y" (y + 10) " w216 h26 -E0x200 Background"
+                . t.panelHot " c" t.text, a.name)
+            Round(ed, 8)
+            y := RowTop()
+            Label(y, "Where to type")
+            Pill("x" (CX + CW - 176) " y" (y + 8) " w160 h30 Center",
+                 a.spot != "" ? "pointed ✓" : "point at it", a.spot != "",
+                 Spotter(i), a.spot = "")
+            break
+        }
+    }
+
+    PageKeys() {
+        Note("Click a key to change it. Hold Ctrl, Alt, Shift or Win with it.")
+        Card(6)
+        KeyRow("Talk to my AI",        "dict")
+        KeyRow("Snip a screenshot",    "snip")
+        KeyRow("Send my highlight",    "sel")
+        KeyRow("Select all and send",  "all")
+        KeyRow("Send by hand",         "post")
+        KeyRow("Start filling",        "fill")
+        Card(1)
+        SetCtl["dictkey"] := ed := CardEdit("Push-to-talk key", SetPend["dictkey"],
+                                            "the one your dictation app uses")
+    }
+
+    PageFill() {
+        Note("Press your filling key, then just copy. Each copy lands in the app "
+           . "and moves on to the next cell, until you press Esc.")
+        Card(2)
+        CardSegment("Then press", "advance", ["Tab", "Enter", "Down", "None"])
+        SetCtl["filltimeout"] := CardEdit("Give up after", SetPend["filltimeout"],
+                                          "seconds with nothing copied · 0 = never")
+    }
+
+    PageOptions() {
+        Note("")
+        Card(3)
+        CardSwitch("Ask me for a note first", "comp")
+        CardSwitch("Send automatically",      "auto")
+        CardSwitch("Come back to my window",  "restore")
+        Card(1)
+        CardSegment("Theme", "theme", ThemeNames)
+    }
+
+    ; ---- the pieces a page is built from -----------------------------------
+    Note(text) {
+        if (text != "") {
+            g.SetFont("s8 c" t.dim)
+            h := StrLen(text) > 70 ? 30 : 16
+            g.Add("Text", "x" CX " y" cy " w" CW " h" h, text)
+            cy += h + 8
+        }
         g.SetFont("s10 c" t.text)
     }
 
-    ; A pill: flat, rounded, accent when it's the one that's on.
+    ; The panel a group of rows sits inside. Drawn first, at the height its
+    ; rows will need, so the rows land on top of it — later controls are the
+    ; ones on top in a Gui, which is the only stacking we get.
+    Card(rows) {
+        cardTop := cy, cardRow := 0, cardN := rows
+        panel := g.Add("Text", "x" CX " y" cy " w" CW " h" (rows * RowH + 8)
+                     . " Background" t.panel)
+        Round(panel, 14)
+        cy += rows * RowH + 8 + 14            ; where the next thing starts
+    }
+
+    ; Where the next row goes, and a hairline under it unless it's the last.
+    RowTop() {
+        y := cardTop + 4 + cardRow * RowH
+        cardRow++
+        if (cardRow < cardN)
+            g.Add("Text", "x" (CX + 16) " y" (y + RowH - 1) " w" (CW - 32) " h1"
+                . " Background" t.panelHot)
+        return y
+    }
+
+    ; A flat, rounded pill. Accent when it's the one that's on.
     Pill(opts, label, on, cb, quiet := false) {
-        p := g.Add("Text", opts " +0x200 +0x80 Background" (on ? t.accent : t.panel)
+        p := g.Add("Text", opts " +0x200 +0x80 Background" (on ? t.accent : t.panelHot)
                  . " c" (on ? t.accentText : (quiet ? t.dim : t.text)), label)
         p.OnEvent("Click", cb)
-        Round(p, 10)
+        Round(p, 9)
         if !on
-            Hover(p, t.panel, t.panelHot)
+            Hover(p, t.panelHot, t.panel)
         return p
     }
 
-    ; One app in the list: the name, an Enter toggle, and a ✕ to drop it.
-    ; The name's tooltip is the window it looks for, so the list stays clean
-    ; but you can still see what an entry actually targets.
-    Row(name, hint, pickAs, idx := 0, enter := "") {
+    ; An iOS-style switch: a rounded track with a round knob parked at one end.
+    ; Two controls, because a Windows checkbox will not be talked into this.
+    ; One control, not two. A knob drawn as a second control on top of the
+    ; track is a sibling overlapping a sibling, and that is exactly what this
+    ; window can't do — so the knob is a character shoved to one end instead.
+    OnOff(x, y, on, cb) {
+        g.SetFont("s13 c" (on ? t.accentText : t.dim))
+        sw := g.Add("Text", "x" x " y" (y + 11) " w48 h24 +0x200 +0x80 "
+                  . (on ? "Right" : "Left")
+                  . " Background" (on ? t.accent : t.panelHot), on ? "●  " : "  ●")
+        sw.OnEvent("Click", cb)
+        Round(sw, 12)
+        if !on
+            Hover(sw, t.panelHot, t.panel)
+        g.SetFont("s10 c" t.text)
+    }
+
+    ; Anything sitting on a card has to be painted the card's colour. A Text
+    ; control with no Background of its own paints the WINDOW's, which shows
+    ; up as a darker block punched through the panel.
+    Label(y, text) {
+        g.SetFont("s10 c" t.text)
+        g.Add("Text", "x" (CX + 16) " y" y " w" (CW - 200) " h" RowH
+            . " +0x200 Background" t.panel, text)
+    }
+
+    CardSwitch(text, key) {
+        y := RowTop()
+        Label(y, text)
+        OnOff(CX + CW - 78, y, SetPend[key] = "1", Flipper(key))
+    }
+
+    CardEdit(text, value, hint) {
+        y := RowTop()
+        g.SetFont("s10 c" t.text)
+        g.Add("Text", "x" (CX + 16) " y" (y + 3) " w" (CW - 200) " h20"
+            . " Background" t.panel, text)
+        ed := g.Add("Edit", "x" (CX + CW - 94) " y" (y + 10) " w78 h26 Center"
+                  . " -E0x200 Background" t.panelHot " c" t.text, value)
+        Round(ed, 8)
+        if (hint != "") {
+            g.SetFont("s8 c" t.dim)
+            g.Add("Text", "x" (CX + 16) " y" (y + RowH - 17) " w" (CW - 130) " h14"
+                . " Background" t.panel, hint)
+        }
+        return ed
+    }
+
+    CardSegment(text, key, options) {
+        y := RowTop()
+        Label(y, text)
+        each := 96
+        span := options.Length * each + (options.Length - 1) * 6
+        for i, opt in options
+            Pill("x" (CX + CW - 16 - span + (i - 1) * (each + 6)) " y" (y + 8)
+               . " w" each " h30 Center", opt, SetPend[key] = opt, Setter(key, opt))
+    }
+
+    KeyRow(text, key) {
+        y := RowTop()
+        Label(y, text)
+        Pill("x" (CX + CW - 176) " y" (y + 8) " w160 h30 Center",
+             Pretty(SetPend[key]), false, Rebinder(key, text))
+    }
+
+    ; One app in the list: the name, an Enter switch, and a ✕ to drop it.
+    ; Selecting one opens its name for editing right underneath.
+    AppRow(name, hint, pickAs, idx := 0, enter := "") {
+        y := RowTop()
         picked := (SetPend["target"] = pickAs)
-        n := Pill("xm y+6 w" (idx ? W - 112 : W) " h" RowH, "   " name, picked,
-                  Picker(pickAs))
+        n := g.Add("Text", "x" (CX + 8) " y" (y + 4) " w" (CW - (idx ? 118 : 16))
+                 . " h" (RowH - 8) " +0x200 +0x80 Background"
+                 . (picked ? t.accent : t.panel)
+                 . " c" (picked ? t.accentText : t.text), "   " name)
         n.ToolTip := hint
+        n.OnEvent("Click", Picker(pickAs))
+        Round(n, 9)
+        if !picked
+            Hover(n, t.panel, t.panelHot)
         if !idx
             return
         on := (enter = "1")
-        e := Pill("x+8 yp w64 h" RowH " Center", on ? "Enter" : "no ↵", false,
-                  Toggler(idx), !on)
+        e := Pill("x+6 yp w62 h" (RowH - 8) " Center", on ? "Enter" : "no ↵",
+                  false, Toggler(idx), !on)
         e.ToolTip := "Press Enter after pasting`nOn for a chat box, off for a document"
-        x := Pill("x+8 yp w32 h" RowH " Center", "✕", false, Dropper(idx), true)
+        x := Pill("x+6 yp w30 h" (RowH - 8) " Center", "✕", false, Dropper(idx), true)
         x.ToolTip := "Remove " name
-        if !picked
-            return
-        ; The one you've selected gets its name in a box, so a long or wrong
-        ; one can be fixed here instead of in a dialog you have to go and find.
-        SetCtl["rename"] := ed := g.Add("Edit",
-            "xm y+6 w" (W - 160) " h28 -E0x200 Background" t.panel " c" t.text, name)
-        Round(ed, 8)
-        spot := Apps[idx].spot
-        Pill("x+8 yp-3 w152 h" RowH " Center", spot != "" ? "typing here ✓" : "where to type",
-             spot != "", Spotter(idx), spot = "")
-        g.SetFont("s8 c" t.dim)
-        g.Add("Text", "xm y+6 w" W, RegExMatch(hint, "i)^ahk_exe\s")
-            ? "Name is just a label — it's found by its program."
-            . (spot != "" ? "  Clicks your box before typing." : "")
-            : "Keep the name to a short bit of its title bar — this one has no"
-            . " program behind it, so the name is how the window is found.")
-        g.SetFont("s10 c" t.text)
-    }
-
-    KeyRow(label, key) {
-        g.SetFont("s10 c" t.text)
-        g.Add("Text", "xm y+6 w" (W - 168) " h" RowH " +0x200", label)
-        Pill("x+8 yp w160 h" RowH " Center", Pretty(SetPend[key]), false,
-             Rebinder(key, label))
-    }
-
-    ; Three side-by-side pills — one is on, and picking is one click, not two.
-    ; NB: don't call that width "w". AHK variable names are case-insensitive, so
-    ; a nested function's "w" IS the enclosing "W", and every control after this
-    ; one silently gets the wrong width.
-    Segment(key, options) {
-        each := (W - (options.Length - 1) * 8) // options.Length
-        for i, opt in options
-            Pill((i = 1 ? "xm y+8" : "x+8 yp") " w" each " h" RowH " Center", opt,
-                 SetPend[key] = opt, Setter(key, opt))
-    }
-
-    Toggle(key, label) {
-        on := (SetPend[key] = "1")
-        Pill("xm y+6 w" (W - 76) " h" RowH, "   " label, false, Flipper(key))
-        Pill("x+8 yp w68 h" RowH " Center", on ? "on" : "off", on, Flipper(key), true)
     }
 
     ; One handler per row, so each keeps its own index — a closure made inside
@@ -1324,6 +1597,7 @@ ShowSettings(*) {
     Dropper(i)         => (*) => RemoveApp(i)
     Spotter(i)         => (*) => SetSpot(g, i)
     Setter(key, val)   => (*) => SetOne(key, val)
+    Pager(name)        => (*) => TurnTo(name)
     Flipper(key)       => (*) => SetOne(key, SetPend[key] = "1" ? "0" : "1")
     Rebinder(key, lbl) => (*) => Rebind(key, lbl)
 
@@ -1339,9 +1613,18 @@ ShowSettings(*) {
     Save(*) {
         global SetCtl, SetPend, SetTheme, cfg
         CommitRename()                          ; a half-typed name still counts
-        SetPend["dictkey"] := Trim(SetCtl["dictkey"].Value)
+        for key, c in SetCtl {                  ; and so does a half-typed box
+            if (key != "rename")
+                try SetPend[key] := Trim(c.Value)
+        }
         if (SetPend["dictkey"] = "") {
             MsgBox("Which key does your dictation app use?", "AI Snap", "Iconx 4096")
+            return
+        }
+        if (!IsInteger(SetPend["filltimeout"])
+            || SetPend["filltimeout"] < 0 || SetPend["filltimeout"] > 86400) {
+            MsgBox("The filling timeout has to be a whole number of seconds,"
+                 . " from 0 (never) up to a day.", "AI Snap", "Iconx 4096")
             return
         }
         IniWrite(SetPend["target"],  cfg, "Target",    "Active")
@@ -1351,10 +1634,13 @@ ShowSettings(*) {
         IniWrite(SetPend["sel"],     cfg, "Hotkeys",   "CopySelection")
         IniWrite(SetPend["all"],     cfg, "Hotkeys",   "CopyAllOnPage")
         IniWrite(SetPend["post"],    cfg, "Hotkeys",   "Post")
+        IniWrite(SetPend["fill"],    cfg, "Hotkeys",   "Fill")
         IniWrite(SetPend["dictkey"], cfg, "Dictation", "Key")
         IniWrite(SetPend["comp"],    cfg, "Behavior",  "Composer")
         IniWrite(SetPend["auto"],    cfg, "Behavior",  "AutoSend")
         IniWrite(SetPend["restore"], cfg, "Behavior",  "RestoreFocus")
+        IniWrite(SetPend["advance"], cfg, "Fill",      "Advance")
+        IniWrite(SetPend["filltimeout"], cfg, "Fill", "Timeout")
         SetTheme := ""                          ; keep the theme, don't undo it
         CloseSettings()
         Reload()                                ; restart with the new settings

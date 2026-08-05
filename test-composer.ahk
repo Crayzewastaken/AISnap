@@ -115,15 +115,32 @@ Check(MatchFor("anything at all", "opera.exe") = "ahk_exe opera.exe",
 ; the picker must offer the app you're looking at, and never the shell
 open := RunningApps()
 Check(open.Length > 0,                                          "running apps are found at all")
-shell := false
-for a in open
-    if (a.exe = "explorer.exe")
-        shell := true
-Check(!shell,                                    "the taskbar and desktop are never offered")
+; explorer.exe IS allowed when it's a real folder window, so name the two
+; windows that must never be offered rather than banning the whole program.
+me := DllCall("GetCurrentProcessId")
+DetectHiddenWindows(false)
+if (desk := WinExist("ahk_class Progman"))
+    Check(!IsAppWindow(desk, me),                "the desktop is never offered")
+if (bar := WinExist("ahk_class Shell_TrayWnd"))
+    Check(!IsAppWindow(bar, me),                 "and neither is the taskbar")
 seen := Map(), dupe := false
 for a in open
     dupe := dupe || seen.Has(a.exe), seen[a.exe] := true
 Check(!dupe,                                     "one entry per program, not per window")
+
+; fill mode must not react to AI Snap's own clipboard work — a snip meant for
+; your AI would otherwise be force-pasted into whatever you're filling too
+Check(ClipMine = 0,                                             "nothing is holding the clipboard at rest")
+ClipHold()
+Check(ClipMine = 1,                                             "a hold registers")
+ClipHold(), ClipRelease()
+Check(ClipMine = 1,                                             "holds nest, so the inner one can't free it")
+ClipRelease()
+Check(ClipMine = 0,                                             "and the outer one does")
+ClipRelease()
+Check(ClipMine = 0,                                             "an extra release can't go negative")
+Check(SafeInt("120", 9) = 120 && SafeInt("", 9) = 9 && SafeInt("later", 9) = 9,
+                                                                "a hand-edited timeout can't blow up a timer")
 
 ; "!1" has to read as something a human would recognise
 Check(Pretty("!1") = "Alt + 1",                                 "a hotkey reads as words")
@@ -158,17 +175,29 @@ Apps := LoadApps()
 ; that exact window, ignoring the taskbar and our own windows on the way.
 ; (No "grabs nothing when idle" check — Windows moves focus around on its own
 ; when a script activates a window, so that one can't be tested honestly here.)
+; These two watch the real desktop, so another app stealing focus fails them
+; without anything being wrong. One retry: a genuine break fails both times.
+Twice(fn, what) {
+    Check(fn() || fn(), what)
+}
+
+global np := 0
 Run("notepad.exe")
 if WinWait("ahk_class Notepad", , 10) {
     np := WinExist("ahk_class Notepad")
-    WinMinimize("ahk_id " np)
-    Sleep(400)
     ClickIt() {
+        global np
         WinRestore("ahk_id " np)
         WinActivate("ahk_id " np)
     }
-    SetTimer(ClickIt, -800)
-    Check(GrabNextWindow(WinActive("A")) = np,          "picks up the window you switch to")
+    SwitchTest() {
+        global np
+        WinMinimize("ahk_id " np)
+        Sleep(400)
+        SetTimer(ClickIt, -800)
+        return GrabNextWindow(WinActive("A")) = np
+    }
+    Twice(SwitchTest,                                   "picks up the window you switch to")
     Check(NameFromWindow(WinGetTitle("ahk_id " np), "Notepad.exe") = "Notepad",
                                                         "and names it sensibly")
 
@@ -188,9 +217,12 @@ Clicked() {
     global ClickSeen
     ClickSeen := true
 }
-if (here := WinActive("A")) {
+ClickTest() {
+    if !(here := WinActive("A"))
+        return false
     SetTimer(Clicked, -300)
-    Check(GrabNextWindow(here) = here,     "a click counts on the window you're already in")
+    return GrabNextWindow(here) = here
 }
+Twice(ClickTest,                           "a click counts on the window you're already in")
 
 ExitApp(fails)

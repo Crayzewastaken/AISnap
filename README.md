@@ -24,8 +24,22 @@ By default it sends to **whichever supported app you used most recently**, so yo
 
 ---
 
+## Filling: copy, copy, copy
+
+**Alt + 9** turns on filling. After that, every single thing you copy lands in your chosen app and then it presses **Tab** to move to the next cell.
+
+Copying an invoice into a spreadsheet stops being *alt-tab, click the cell, paste, alt-tab back, select, copy, alt-tab, click, paste.* It becomes: copy, copy, copy.
+
+It works out of any program — a PDF, a website, an email, a scanned form — into any other. A tag stays on screen the whole time it's armed, because a mode that changes what every copy does should never be something you forget you switched on. **Esc** stops it, and so does two minutes of not copying anything.
+
+Under **Filling** in Settings you can change what it presses to move on: **Tab** across a row, **Enter** or **Down** to go down a column, or **None** to just paste in place.
+
+---
+
 ## What's new
 
+- **Filling mode.** Alt+9, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
+- **Settings has pages now.** A sidebar down the left — Send to, Keys, Filling, Options — with grouped cards and proper switches instead of one long scroll of controls.
 - **Send it anywhere.** Settings now opens on your list of apps. Hit **Running apps**, click the one you want, and your snips go there from now on — Word, Excel, a browser, T3, anything. Or **Click an app** and just click it on your taskbar. See [Sending to any app](#sending-to-any-app).
 - **A settings card, not a dialog.** Same dark rounded look as the composer, and it follows your theme as you pick it. Your apps are a list you can add to, pick from and remove from with a ✕ — no dropdown to hunt through, and no pop-ups: the selected app's name is a box you type in, right there in the list.
 - **Keys read like keys.** They show as *Alt + 2*, and clicking one asks you to press the combo you want.
@@ -63,6 +77,7 @@ That's it. A small green **H** icon appears in your system tray (bottom-right, n
 | Send the text you've highlighted | **Alt + 3** |
 | Send everything on the page (select-all) | **Alt + 4** |
 | Send by hand (if auto-send is off) | **Alt + 0** |
+| Start filling — every copy lands in the next cell | **Alt + 9** |
 
 Typical flow: highlight some text → **Alt+3** → type what you want to ask about it → **Enter**. Or **Alt+2**, drag a box, say your piece, Enter. Never leaving your work.
 
