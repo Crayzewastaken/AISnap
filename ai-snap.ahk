@@ -95,6 +95,17 @@ catch
 A_TrayMenu.Delete()
 A_TrayMenu.Add("Settings…", (*) => ShowSettings())
 A_TrayMenu.Default := "Settings…"          ; double-click the tray icon opens it
+
+; Left-click the tray icon and you get the same menu as right-click. One icon
+; with two different behaviours is just one more thing to have to remember.
+; 0x404 = AHK_NOTIFYICON, and lParam is the mouse message that caused it.
+OnMessage(0x404, TrayClick)
+TrayClick(wParam, lParam, *) {
+    if (lParam = 0x202) {                  ; WM_LBUTTONUP
+        A_TrayMenu.Show()
+        return 0                           ; ...instead of the usual handling
+    }
+}
 A_TrayMenu.Add()
 A_TrayMenu.Add("Get Handy (voice dictation)…", (*) => InstallHandy())
 A_TrayMenu.Add("Edit config.ini directly", (*) => Run(cfg))
@@ -1314,9 +1325,12 @@ ShowSettings(*) {
     global cfg, Apps, Theme, ThemeNames, SetPage
     global SetGui, SetHead, SetCtl, SetPend, SetTheme, SetFresh
     SettingsState()
-    if SetGui {
-        try SetGui.Destroy()
-        SetGui := 0
+    ; Keep the old window up while the new one is built, then swap. Destroying
+    ; first leaves a hole on screen for as long as the rebuild takes, and since
+    ; every click in here rebuilds, that hole is what made it flash.
+    old := SetGui, ox := "", oy := ""
+    if old {
+        try WinGetPos(&ox, &oy, , , "ahk_id " old.Hwnd)
     }
     SetCtl := Map()
     if (SetTheme = "")                        ; remember the saved one first,
@@ -1332,6 +1346,17 @@ ShowSettings(*) {
     RowH := 46                                ; one row in a card
     PAGES := ["Send to", "Keys", "Filling", "Options"]
     cardTop := 0, cardRow := 0, cardN := 0    ; the card the rows are landing in
+
+    ; Every page is the height of the tallest one, so moving between them
+    ; doesn't resize the window out from under your cursor. Only "Send to"
+    ; and "Keys" can be the tallest — the other two are always shorter.
+    picked := false
+    for a in Apps
+        picked := picked || (a.name = SetPend["target"])
+    appsH := 30 + ((Apps.Length + 1) * RowH + 8) + 14 + 38 + 16
+           + (picked ? (2 * RowH + 8) + 14 : 0)
+    keysH := 16 + (6 * RowH + 8) + 14 + (RowH + 8) + 14
+    WH := 52 + Max(appsH, keysH) + 68          ; header + content + save row
 
     SetGui := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap settings")
     g.MarginX := 0, g.MarginY := 0
@@ -1371,8 +1396,9 @@ ShowSettings(*) {
         PageOptions()
 
     ; ---- save --------------------------------------------------------------
-    cy += 12
-    ThemeButton(g, t, "Save and reload", "x" CX " y" cy " w" (CW - 132) " h40", Save, true)
+    ; Pinned to the bottom of the fixed height, not to wherever the page ended.
+    sy := WH - 56
+    ThemeButton(g, t, "Save and reload", "x" CX " y" sy " w" (CW - 132) " h40", Save, true)
     ThemeButton(g, t, "Cancel", "x+8 w124 h40", (*) => CloseSettings())
     g.SetFont("s12 c" t.dim)
     g.Add("Text", "x" (CX + CW - 30) " y20 w30 h28 Center +0x200 +0x100 Background" t.bg, "✕")
@@ -1380,7 +1406,10 @@ ShowSettings(*) {
 
     g.OnEvent("Escape", (*) => CloseSettings())
     g.OnEvent("Close",  (*) => CloseSettings())
-    g.Show("w" (CX + CW + 26) " h" (cy + 68))
+    g.Show((ox = "" ? "" : "x" ox " y" oy " ") "w" (CX + CW + 26) " h" WH)
+    if old {
+        try old.Destroy()                 ; the new one is already covering it
+    }
     ; Just added one? Land in its name box with the text selected, so a page
     ; title that came out too long can be typed over straight away.
     if (SetFresh && SetCtl.Has("rename")) {
@@ -1521,9 +1550,9 @@ ShowSettings(*) {
     ; Anything sitting on a card has to be painted the card's colour. A Text
     ; control with no Background of its own paints the WINDOW's, which shows
     ; up as a darker block punched through the panel.
-    Label(y, text) {
+    Label(y, text, wide := 0) {
         g.SetFont("s10 c" t.text)
-        g.Add("Text", "x" (CX + 16) " y" y " w" (CW - 200) " h" RowH
+        g.Add("Text", "x" (CX + 16) " y" y " w" (wide ? wide : CW - 200) " h" RowH
             . " +0x200 Background" t.panel, text)
     }
 
@@ -1549,10 +1578,12 @@ ShowSettings(*) {
         return ed
     }
 
+    ; The pills are drawn after the label, so they'd quietly cover it — give
+    ; the label only the room they don't want, and size them to what's left.
     CardSegment(text, key, options) {
         y := RowTop()
-        Label(y, text)
-        each := 96
+        Label(y, text, 118)
+        each := (CW - 152 - (options.Length - 1) * 6) // options.Length
         span := options.Length * each + (options.Length - 1) * 6
         for i, opt in options
             Pill("x" (CX + CW - 16 - span + (i - 1) * (each + 6)) " y" (y + 8)
