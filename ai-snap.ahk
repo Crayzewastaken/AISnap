@@ -10,6 +10,10 @@
 ; ============================================================================
 
 cfg := A_ScriptDir "\config.ini"
+; config.ini is yours — it isn't in the repo, so updating never overwrites
+; your apps and keys. First run copies the shipped defaults into place.
+if (!FileExist(cfg) && FileExist(A_ScriptDir "\config.example.ini"))
+    try FileCopy(A_ScriptDir "\config.example.ini", cfg)
 SetTitleMatchMode(2)              ; allow partial window-title matches
 InstallKeybdHook()                ; see keys even when another app swallows them
 
@@ -122,8 +126,13 @@ if A_IsAdmin
             "AI Snap doesn't need it, and it can reach admin windows this way."
           . " Start it normally instead.", 2)
 
-TrayTip("AI Snap is running",
-        "Talk: " keyDict "   Snip: " keySnip "   Copy: " keySel "   All: " keyAll, 1)
+; First time here? Say hello. On a timer so the auto-execute section finishes
+; and the tray icon is up before the card appears on top of it.
+if (IniRead(cfg, "Behavior", "Welcomed", "0") != "1")
+    SetTimer(ShowWelcome, -700)
+else
+    TrayTip("AI Snap is running",
+            "Talk: " keyDict "   Snip: " keySnip "   Copy: " keySel "   All: " keyAll, 1)
 
 ; ============================================================================
 ;  actions
@@ -226,14 +235,18 @@ PostToAI(*) {
 ;  time and stops on its own if you wander off.
 ; ============================================================================
 ToggleFill(*) {
-    global Filling
+    global Filling, SetGui
     Filling ? StopFill("you turned it off") : StartFill()
+    if SetGui
+        RefreshSettings()             ; so the switch shows what's actually true
 }
 
 StartFill() {
     global Filling, FillLast, FillAdvance
     KeyWait("Alt", "T1")
-    if !FocusTarget() {              ; no point arming with nowhere to put it
+    ; Check there's somewhere to put things, but don't go there — arming
+    ; shouldn't drag you off whatever you're about to copy from.
+    if !FindTarget() {
         TrayTip("Nothing to fill", "Open the app you want to fill first.", 2)
         return
     }
@@ -1230,6 +1243,60 @@ Preview(t) {
 }
 
 ; ============================================================================
+;  first run — a short hello, once
+;
+;  Nothing about this app is visible until you press a key, so without this
+;  the first run is a tray icon and no idea what to do with it. Shown once,
+;  then never again: [Behavior] Welcomed in config.ini.
+; ============================================================================
+ShowWelcome() {
+    global cfg
+    t := ThemeNow()
+    g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap welcome")
+    g.MarginX := 26, g.MarginY := 24
+    ApplyTheme(g, t)
+
+    g.SetFont("s15 w700 c" t.accent, t.font)
+    g.Add("Text", "xm ym w400", "AI Snap is running")
+    g.SetFont("s9 c" t.dim)
+    g.Add("Text", "xm y+4 w400", "Three keys, and they work in any program.")
+
+    g.SetFont("s10 c" t.text)
+    Step("Alt + 2", "Drag a box on screen — it goes to your AI")
+    Step("Alt + 3", "Sends whatever text you've highlighted")
+    Step("Alt + 9", "Filling — every copy lands in the next cell")
+
+    g.SetFont("s9 c" t.dim)
+    g.Add("Text", "xm y+18 w400",
+          "Grab something and a small box opens. Type a note, grab more if you"
+        . " like, then hit Enter — it all arrives as one message.")
+    g.Add("Text", "xm y+12 w400",
+          "Click the tray icon whenever you want to change any of this.")
+
+    g.SetFont("s10 c" t.text)
+    ThemeButton(g, t, "Show me the settings", "xm y+22 w194 h40", Both, true)
+    ThemeButton(g, t, "Got it", "x+12 w194 h40", Done)
+    g.OnEvent("Escape", Done)
+    g.OnEvent("Close",  Done)
+    g.Show()
+
+    Step(key, what) {
+        p := g.Add("Text", "xm y+12 w96 h32 Center +0x200 +0x80 Background" t.panel
+                 . " c" t.text, key)
+        Round(p, 9)
+        g.Add("Text", "x+12 yp w292 h32 +0x200", what)
+    }
+    Done(*) {
+        try IniWrite("1", cfg, "Behavior", "Welcomed")
+        g.Destroy()
+    }
+    Both(*) {
+        Done()
+        ShowSettings()
+    }
+}
+
+; ============================================================================
 ;  settings — one card. Your apps live at the top as a list you can add to,
 ;  remove from and pick from; keys and options sit underneath.
 ;
@@ -1393,7 +1460,7 @@ Rebind(key, label) {
 }
 
 ShowSettings(*) {
-    global cfg, Apps, Theme, ThemeNames, SetPage
+    global cfg, Apps, Theme, ThemeNames, SetPage, Filling
     global SetGui, SetHead, SetCtl, SetPend, SetTheme, SetFresh
     SettingsState()
     ; Keep the old window up while the new one is built, then swap. Destroying
@@ -1540,8 +1607,11 @@ ShowSettings(*) {
     }
 
     PageFill() {
-        Note("Press your filling key, then just copy. Each copy lands in the app "
-           . "and moves on to the next cell, until you press Esc.")
+        Note("Turn it on and just copy. Every copy lands in your app and moves "
+           . "to the next cell. It stays on until you turn it off.")
+        Card(1)
+        LiveSwitch(Filling ? "On — every copy is landing" : "Off",
+                   Filling, (*) => ToggleFill())
         Card(2)
         CardSegment("Then press", "advance", ["Tab", "Enter", "Down", "None"])
         SetCtl["filltimeout"] := CardEdit("Give up after", SetPend["filltimeout"],
@@ -1631,6 +1701,14 @@ ShowSettings(*) {
         y := RowTop()
         Label(y, text)
         OnOff(CX + CW - 78, y, SetPend[key] = "1", Flipper(key))
+    }
+
+    ; Not a setting you save — a thing that's happening right now, flipped
+    ; the moment you click it.
+    LiveSwitch(text, on, cb) {
+        y := RowTop()
+        Label(y, text)
+        OnOff(CX + CW - 78, y, on, cb)
     }
 
     CardEdit(text, value, hint) {

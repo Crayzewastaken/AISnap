@@ -21,6 +21,12 @@ try {
         CaptureCombo("Snip screenshot → send")
         FileAppend("captured`n", lg)
         ExitApp(0)
+    } else if (which = "welcome") {
+        ShowWelcome()
+        win := 0
+        for hwnd in WinGetList("ahk_class AutoHotkeyGUI")
+            if (WinGetTitle("ahk_id " hwnd) = "AI Snap welcome")
+                win := hwnd
     } else {
         if (which != "settings")
             SetPage := which          ; "Keys", "Filling", "Options"

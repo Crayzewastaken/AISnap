@@ -26,7 +26,7 @@ By default it sends to **whichever supported app you used most recently**, so yo
 
 ## Filling: copy, copy, copy
 
-**Alt + 9** turns on filling. After that, every single thing you copy lands in your chosen app and then it presses **Tab** to move to the next cell.
+**Alt + 9** turns on filling — or the switch on the **Filling** page in Settings, whichever you'd rather. After that, every single thing you copy lands in your chosen app and then it presses **Tab** to move to the next cell. It stays on until you turn it off.
 
 Copying an invoice into a spreadsheet stops being *alt-tab, click the cell, paste, alt-tab back, select, copy, alt-tab, click, paste.* It becomes: copy, copy, copy.
 
@@ -38,7 +38,9 @@ Under **Filling** in Settings you can change what it presses to move on: **Tab**
 
 ## What's new
 
-- **Filling mode.** Alt+9, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
+- **Filling mode.** Alt+9 or a switch in Settings, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
+- **It says hello now.** First run gives you a short card with the three keys, instead of a tray icon and no idea what to do with it.
+- **Your settings are yours.** `config.ini` is no longer in the repo — the defaults ship as `config.example.ini` and get copied on first run, so updating never overwrites your apps and keys.
 - **Settings has pages now.** A sidebar down the left — Send to, Keys, Filling, Options — with grouped cards and proper switches instead of one long scroll of controls.
 - **Send it anywhere.** Settings now opens on your list of apps. Hit **Running apps**, click the one you want, and your snips go there from now on — Word, Excel, a browser, T3, anything. Or **Click an app** and just click it on your taskbar. See [Sending to any app](#sending-to-any-app).
 - **A settings card, not a dialog.** Same dark rounded look as the composer, and it follows your theme as you pick it. Your apps are a list you can add to, pick from and remove from with a ✕ — no dropdown to hunt through, and no pop-ups: the selected app's name is a box you type in, right there in the list.
@@ -154,7 +156,7 @@ If messages get sent before you've finished, raise `Wait` under `[Dictation]` in
 
 **Easiest way:** double-click the tray icon (or right-click → **Settings…**). The card opens on your list of apps — click the one to send to, click a key to change it, flip the options, hit **Save and reload**. Done.
 
-Prefer editing by hand? Everything lives in **`config.ini`** (tray → **Edit config.ini directly**, then **Reload**).
+Prefer editing by hand? Everything lives in **`config.ini`** (tray → **Edit config.ini directly**, then **Reload**). That file is created from `config.example.ini` the first time you run it, and it isn't in the repo — so pulling an update never overwrites your apps, keys or themes.
 Hotkey symbols there: `^` = Ctrl, `!` = Alt, `+` = Shift, `#` = Windows key — so `!1` is Alt+1.
 (Heads up: Ctrl+Alt combos can clash with **AltGr** on some keyboards and silently do nothing — that's why the defaults are plain Alt.)
 

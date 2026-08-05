@@ -1,3 +1,7 @@
+# Your own settings. config.example.ini is the one in the repo; it gets
+# copied to config.ini on first run, and that copy is yours to keep.
+config.ini
+
 # Compiled output
 *.exe
 
