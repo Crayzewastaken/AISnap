@@ -126,6 +126,14 @@ if A_IsAdmin
             "AI Snap doesn't need it, and it can reach admin windows this way."
           . " Start it normally instead.", 2)
 
+; Were we filling when the settings window saved and restarted us? Pick it
+; back up. The flag is consumed on the way in, so starting AI Snap fresh
+; tomorrow never comes up already armed.
+if (IniRead(cfg, "Fill", "Resume", "0") = "1") {
+    try IniWrite("0", cfg, "Fill", "Resume")
+    SetTimer(StartFill, -900)
+}
+
 ; First time here? Say hello. On a timer so the auto-execute section finishes
 ; and the tray icon is up before the card appears on top of it.
 if (IniRead(cfg, "Behavior", "Welcomed", "0") != "1")
@@ -258,7 +266,17 @@ StartFill() {
     Log("fill armed, advance=" FillAdvance)
 }
 
-StopFillKey(*) => StopFill("you pressed Esc")
+; Esc pressed inside one of OUR windows is closing that window — the settings
+; card, the composer, the hello. It isn't a request to stop filling, and
+; treating it as one meant closing settings quietly switched filling off.
+StopFillKey(*) {
+    try {
+        if (a := WinActive("A"))
+            if (WinGetPID("ahk_id " a) = DllCall("GetCurrentProcessId"))
+                return
+    }
+    StopFill("you pressed Esc")
+}
 
 StopFill(why) {
     global Filling, FillBadge
@@ -1791,7 +1809,7 @@ ShowSettings(*) {
     }
 
     Save(*) {
-        global SetCtl, SetPend, SetTheme, cfg
+        global SetCtl, SetPend, SetTheme, cfg, Filling
         CommitRename()                          ; a half-typed name still counts
         for key, c in SetCtl {                  ; and so does a half-typed box
             if (key != "rename")
@@ -1821,6 +1839,10 @@ ShowSettings(*) {
         IniWrite(SetPend["restore"], cfg, "Behavior",  "RestoreFocus")
         IniWrite(SetPend["advance"], cfg, "Fill",      "Advance")
         IniWrite(SetPend["filltimeout"], cfg, "Fill", "Timeout")
+        ; Saving restarts the script, and a restart forgets everything that
+        ; isn't in this file — including a mode you switched on ten seconds
+        ; ago on this very page. Carry it over.
+        IniWrite(Filling ? "1" : "0", cfg, "Fill", "Resume")
         SetTheme := ""                          ; keep the theme, don't undo it
         CloseSettings()
         Reload()                                ; restart with the new settings
