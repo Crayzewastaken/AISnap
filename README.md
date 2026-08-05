@@ -247,6 +247,40 @@ If you'd rather not install AutoHotkey on every machine, right-click `ai-snap.ah
 
 ---
 
+## What it does to your machine
+
+Worth being precise about, because AI Snap watches your keyboard and your clipboard, and you should know exactly how far that goes. Everything below is checkable in `ai-snap.ahk` — it's one readable file.
+
+**Nothing leaves your PC.** There is no network code in it at all: no HTTP, no sockets, no telemetry, no update check, no analytics. Grep it yourself:
+
+```bash
+grep -Ei 'WinHttp|XMLHTTP|InternetOpen|URLDownload|http://|https://|socket' ai-snap.ahk
+```
+
+That returns nothing. There is nowhere for your data to go.
+
+**What it does use, and why:**
+
+| It does this | Because |
+|---|---|
+| Watches for your hotkeys system-wide | So they work while you're in another program |
+| Watches the clipboard — **only while filling is on** | That's how filling knows you copied something |
+| Sends keystrokes to another window | Pasting into your AI *is* Ctrl+V in that window |
+| Reads window titles and process names | To find the app you asked it to send to |
+| Triggers Windows' own screen snip | That's the screenshot key |
+| Writes two files, next to the script | `config.ini` (your settings) and `ai-snap.log` (off by default) |
+
+**What it deliberately doesn't do:** it never writes what you copied to disk. With `Debug = 1` the log records that something was attached and how big it was — `attached: Text (312 bytes)` — never the text itself. Logs get pasted into bug reports.
+
+**Two things to know:**
+
+- **Don't run it as administrator.** It doesn't need it, and elevated it could reach admin windows too. It'll warn you if you do.
+- **While filling is armed, everything you copy gets pasted.** If that includes a password, it goes into the app you're filling. That's why it puts a tag on screen the whole time, stops on Esc, and gives up on its own.
+
+**If your antivirus flags it:** a program that hooks the keyboard, watches the clipboard and types into other windows looks exactly like something that steals passwords — that's the same set of tricks. The difference is where it sends them, which is nowhere. That's why this is shipped as source you can read rather than an `.exe` you have to trust.
+
+---
+
 ## Notes
 
 Desktop apps work best (a browser tab can be matched by title, but only when it's the active tab). AI Snap never sends your messages or clipboard anywhere — it's just keystrokes on your own PC.

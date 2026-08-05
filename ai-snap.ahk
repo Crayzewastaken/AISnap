@@ -114,6 +114,13 @@ A_TrayMenu.Add()
 A_TrayMenu.Add("Exit", (*) => ExitApp())
 UpdateTrayTip()
 
+; Run as a normal user, always. Elevated, the keyboard hook and the keystrokes
+; it sends reach admin windows too, which turns a small tool into a large one.
+if A_IsAdmin
+    TrayTip("Running as administrator",
+            "AI Snap doesn't need it, and it can reach admin windows this way."
+          . " Start it normally instead.", 2)
+
 TrayTip("AI Snap is running",
         "Talk: " keyDict "   Snip: " keySnip "   Copy: " keySel "   All: " keyAll, 1)
 
@@ -557,11 +564,23 @@ AppToLaunch() {
 }
 
 ; Start an app: a full path to an .exe, or an app id from the Start menu.
+; This is the only field in config.ini that starts a process, and config.ini
+; lives in a folder you can write to — so it runs a file that actually exists
+; or a plain Start-menu app id, and nothing else. Anything carrying spaces,
+; quotes, & or | isn't an app id and doesn't get handed to the shell.
 Launch(app) {
-    target := (InStr(app.launch, "\") || InStr(app.launch, ".exe"))
-        ? app.launch
-        : "explorer.exe shell:AppsFolder\" app.launch
-    try Run(target)
+    if (InStr(app.launch, "\") || InStr(app.launch, ".exe")) {
+        if !FileExist(app.launch) {
+            Log("won't launch, no such file: " app.launch)
+            return
+        }
+        try Run(app.launch)
+        return
+    }
+    if RegExMatch(app.launch, "^[\w.\-]+(_[\w]+)?(![\w.\-]+)?$") {
+        try Run("explorer.exe shell:AppsFolder\" app.launch)
+    } else
+        Log("won't launch, not an app id: " app.launch)
 }
 
 ; Read the [Apps] section into a list of {name, match, launch, enter, spot}.
@@ -638,7 +657,8 @@ ClickApp(g) {
         TrayTip("Nothing picked", "Nothing was clicked, so nothing changed.", 2)
         return 0
     }
-    Log("click-pick: got " id " — " WinGetTitle("ahk_id " id))
+    ; the process, not the title — a window title can be a client's name
+    Log("click-pick: got " id " — " WinGetProcessName("ahk_id " id))
     return AppFromWindow(id)
 }
 
@@ -818,6 +838,12 @@ RematchFor(name, oldMatch) {
     return MatchFor(name, Trim(m[1]))
 }
 
+; Never write what you copied into a file. The chip on screen shows you a
+; preview because you're the one looking at it; a log gets emailed into bug
+; reports, synced, and backed up. So the log gets the KIND of thing, never
+; the thing. "Text: my bank password" becomes "Text".
+Redact(label) => RegExReplace(label, "^([^:]+):.*$", "$1")
+
 ; Write a line to ai-snap.log when Debug=1 in config.ini.
 Log(msg) {
     global Debug
@@ -955,8 +981,8 @@ HoverCheck() {
 ; an image — so pasting it later is identical to pasting it now.
 Attach(label, prev, wait) {
     global Comp, CompItems
-    CompItems.Push({ label: label, data: ClipboardAll(), wait: wait })
-    Log("attached: " label)
+    CompItems.Push(it := { label: label, data: ClipboardAll(), wait: wait })
+    Log("attached: " Redact(label) " (" it.data.Size " bytes)")
     UpdateTrayTip()
     if Comp
         RebuildComposer()             ; already open — redraw it with the new chip
@@ -1087,7 +1113,7 @@ ComposerSend(*) {
             ; it meant Ctrl+V arrived at an empty clipboard — which is where the
             ; "Nothing to paste from the clipboard" toasts came from.
             if !ClipWait(4, 1) {      ; 1 = images count as something
-                Log("clipboard never came back for: " it.label)
+                Log("clipboard never came back for: " Redact(it.label))
                 continue
             }
             Send("^v")

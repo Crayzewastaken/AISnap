@@ -142,6 +142,12 @@ Check(ClipMine = 0,                                             "an extra releas
 Check(SafeInt("120", 9) = 120 && SafeInt("", 9) = 9 && SafeInt("later", 9) = 9,
                                                                 "a hand-edited timeout can't blow up a timer")
 
+; what you copied must never reach the log file, only what KIND it was
+Check(Redact("Text: my bank password") = "Text",                "the log gets the kind, not the text")
+Check(Redact("Whole page: Dear Mr Smith, your account") = "Whole page",
+                                                                "and not a whole page either")
+Check(Redact("Screenshot") = "Screenshot",                      "something with no preview is left alone")
+
 ; "!1" has to read as something a human would recognise
 Check(Pretty("!1") = "Alt + 1",                                 "a hotkey reads as words")
 Check(Pretty("^+#f4") = "Ctrl + Shift + Win + F4",              "modifiers come out in order")
