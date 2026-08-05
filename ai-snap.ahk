@@ -16,6 +16,7 @@ InstallKeybdHook()                ; see keys even when another app swallows them
 ; --- settings (read from config.ini, with safe fallbacks) -------------------
 global Apps         := LoadApps()
 global LastApp      := 0          ; the app we last sent to — see EnterOK()
+global LastTarget   := 0          ; and its window, so we paste into that one
 global Active       := IniRead(cfg, "Target",   "Active",         "Auto")
 global RestoreFocus := IniRead(cfg, "Behavior", "RestoreFocus",   "1")
 global AutoSend     := IniRead(cfg, "Behavior", "AutoSend",       "1")
@@ -274,7 +275,10 @@ FillPaste(type) {
         return
     }
     FillLast := A_TickCount
-    Send("^v")
+    if !Paste() {                     ; don't advance a cell we never filled
+        GoBack(prev)
+        return
+    }
     Sleep(90)
     if (FillAdvance != "" && FillAdvance != "None")
         Send("{" FillAdvance "}")
@@ -340,9 +344,10 @@ GrabTextToAI(copyKeys, label) {
 PasteIntoAI(prev, settle) {
     if !FocusTarget()
         return
-    Send("^v")
-    Sleep(settle)                     ; let it attach before we send
-    Submit()
+    if Paste() {
+        Sleep(settle)                 ; let it attach before we send
+        Submit()
+    }
     GoBack(prev)
 }
 
@@ -397,7 +402,8 @@ GoBack(prev) {
 ; Bring the target AI window to the front — whatever state it's in.
 ; Handles: focused, minimised, hidden to the tray, or not running at all.
 FocusTarget() {
-    global LastApp
+    global LastApp, LastTarget
+    LastTarget := 0
     id := FindTarget()
     if !id {                                   ; nothing open — try launching one
         if !(app := AppToLaunch()) {
@@ -419,11 +425,29 @@ FocusTarget() {
     WinActivate("ahk_id " id)
     ok := WinWaitActive("ahk_id " id, , 3)
     if ok {
+        LastTarget := id
         GiveFocus(id)
         ClickSpot(id)
     }
     Log("FocusTarget id=" id " activated=" (ok ? "yes" : "no"))
     return ok
+}
+
+; Ctrl+V, but only into the window we actually lined up.
+;
+; Bringing a window to the front and typing into it are two separate moments,
+; and things happen in between: a toast appears, a slow app finishes starting,
+; a dialog opens. The paste would go wherever focus went — and what's on the
+; clipboard might be a screenshot of your screen or a page of copied text.
+; Sending a message one attachment at a time makes that gap seconds long.
+Paste() {
+    global LastTarget
+    if (LastTarget && WinActive("A") != LastTarget) {
+        Log("something else took focus — not pasting")
+        return false
+    }
+    Send("^v")
+    return true
 }
 
 ; Put the caret in the box you actually type in.
@@ -434,6 +458,12 @@ FocusTarget() {
 ; in every program. You point at the box once and we remember the spot as a
 ; fraction of the window, so it still lands after you move or resize it, or
 ; move it to a different monitor.
+; A spot is a fraction of the window, so anything outside 0 to 1 would click
+; outside the window — the taskbar, the desktop, whatever app is next to it.
+; The picker can only ever write a value inside the window, but config.ini is
+; hand-editable and the tray menu invites you to edit it.
+InWindow(v) => !IsNumber(v) ? 0.5 : Min(1, Max(0, v + 0))
+
 ClickSpot(id) {
     global LastApp
     if (!LastApp || LastApp.spot = "")
@@ -445,7 +475,8 @@ ClickSpot(id) {
         WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " id)
         ; Integer(), not Round() — this script has its own Round() for corners
         ; and AHK names are case-insensitive, so the built-in is unreachable.
-        x := wx + Integer(at[1] * ww), y := wy + Integer(at[2] * wh)
+        x := wx + Integer(InWindow(at[1]) * ww)
+        y := wy + Integer(InWindow(at[2]) * wh)
         CoordMode("Mouse", "Screen")
         MouseGetPos(&mx, &my)             ; put the pointer back afterwards —
         Click(x, y)                       ; nobody asked us to move their mouse
@@ -1107,6 +1138,7 @@ ComposerSend(*) {
     }
     ClipHold()                        ; every line below changes the clipboard,
     try {                             ; and none of them are for fill mode
+        stolen := false
         for it in items {
             A_Clipboard := it.data    ; put that exact grab back on the clipboard
             ; Wait for it to actually land. A fixed sleep was a race, and losing
@@ -1116,15 +1148,28 @@ ComposerSend(*) {
                 Log("clipboard never came back for: " Redact(it.label))
                 continue
             }
-            Send("^v")
+            if !Paste() {             ; something jumped in front mid-send
+                stolen := true
+                break
+            }
             Sleep(it.wait)            ; images especially need a moment to attach
         }
-        if (Trim(note) != "") {
+        if (!stolen && Trim(note) != "") {
             A_Clipboard := note
-            if ClipWait(4, 1) {
-                Send("^v")
+            if (ClipWait(4, 1) && !Paste())
+                stolen := true
+            else
                 Sleep(120)
-            }
+        }
+        if stolen {
+            ; Half a message is worse than none — leave the rest unsent and
+            ; hand it all back rather than firing Enter on a partial one.
+            CompItems := items, CompNote := note
+            UpdateTrayTip()
+            TrayTip("Send stopped", "Something else took focus. Nothing was sent"
+                  . " on, and your grabs are still here.", 2)
+            ShowComposer(prev)
+            return
         }
         if EnterOK() {                ; you clicked Send, so we always send —
             Send("{Enter}")           ; unless it's Word and Enter means nothing

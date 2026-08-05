@@ -148,6 +148,18 @@ Check(Redact("Whole page: Dear Mr Smith, your account") = "Whole page",
                                                                 "and not a whole page either")
 Check(Redact("Screenshot") = "Screenshot",                      "something with no preview is left alone")
 
+; a typing spot is a fraction of the window, so it can never point outside it
+Check(InWindow("0.5") = 0.5,                                    "a normal spot is left alone")
+Check(InWindow("5") = 1 && InWindow("-3") = 0,                  "a hand-edited spot is pulled back inside")
+Check(InWindow("nonsense") = 0.5,                               "and nonsense lands in the middle")
+
+; a paste only ever goes into the window we lined up
+LastTarget := 0
+Check(Paste() = true,                                           "with no target, a paste just happens")
+LastTarget := -1                                                ; a window that isn't the active one
+Check(Paste() = false,                                          "if something else took focus, it doesn't")
+LastTarget := 0
+
 ; "!1" has to read as something a human would recognise
 Check(Pretty("!1") = "Alt + 1",                                 "a hotkey reads as words")
 Check(Pretty("^+#f4") = "Ctrl + Shift + Win + F4",              "modifiers come out in order")
