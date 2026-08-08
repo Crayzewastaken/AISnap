@@ -153,6 +153,12 @@ Check(InWindow("0.5") = 0.5,                                    "a normal spot i
 Check(InWindow("5") = 1 && InWindow("-3") = 0,                  "a hand-edited spot is pulled back inside")
 Check(InWindow("nonsense") = 0.5,                               "and nonsense lands in the middle")
 
+; a saved button position can't strand it off the edge of a screen you unplugged
+Check(OnScreen("300", 48, 1920) = 300,                          "a sane position is kept")
+Check(OnScreen("99999", 48, 1920) = 1872,                       "past the right edge is pulled back")
+Check(OnScreen("-500", 48, 1920) = 0,                           "and so is past the left")
+Check(OnScreen("", 48, 1920) = 0,                               "a blank position starts at the corner")
+
 ; a paste only ever goes into the window we lined up
 LastTarget := 0
 Check(Paste() = true,                                           "with no target, a paste just happens")

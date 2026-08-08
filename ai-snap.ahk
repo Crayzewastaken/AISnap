@@ -39,6 +39,17 @@ global CompEdit  := 0, CompHead := 0
 global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
 global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
 
+; --- the floating button (see the badge section further down) ---------------
+; Declared up here, not next to its own code: the auto-execute section calls
+; ShowBadge() before it ever reaches that part of the file, and reading a
+; global that hasn't been assigned yet stops the whole script dead on an
+; error box you can't see behind everything else.
+global Badge      := 0        ; the window, 0 when it isn't up
+global BadgeDot   := 0        ; the round control you actually click
+global BadgeHits  := 0        ; clicks so far, waiting to see if more arrive
+global BadgeFrom  := [0, 0, 0, 0]   ; mouse x,y and window x,y when you pressed
+global BadgeMoved := false
+
 ; --- fill mode (see the fill section further down) --------------------------
 global Filling     := false   ; armed: every copy lands and moves on
 global FillLast    := 0       ; when the last one landed, for the idle timeout
@@ -112,6 +123,7 @@ TrayClick(wParam, lParam, *) {
     }
 }
 A_TrayMenu.Add()
+A_TrayMenu.Add("Show the floating button", (*) => ToggleBadge())
 A_TrayMenu.Add("Get Handy (voice dictation)…", (*) => InstallHandy())
 A_TrayMenu.Add("Edit config.ini directly", (*) => Run(cfg))
 A_TrayMenu.Add("Reload", (*) => Reload())
@@ -125,6 +137,10 @@ if A_IsAdmin
     TrayTip("Running as administrator",
             "AI Snap doesn't need it, and it can reach admin windows this way."
           . " Start it normally instead.", 2)
+
+; The little round button on screen, unless you've put it away.
+if (IniRead(cfg, "Look", "Button", "1") = "1")
+    ShowBadge()
 
 ; Were we filling when the settings window saved and restarted us? Pick it
 ; back up. The flag is consumed on the way in, so starting AI Snap fresh
@@ -1055,7 +1071,13 @@ Attach(label, prev, wait) {
 ; There's no title bar to grab, so dragging the heading moves the card.
 ; 0xA1 = "act like the mouse went down on the caption", 2 = the caption.
 DragCard(wParam, lParam, msg, hwnd) {
-    global Comp, CompHead, SetGui, SetHead
+    global Comp, CompHead, SetGui, SetHead, Badge, BadgeDot
+    ; The floating button does its own thing — it has to tell a click from a
+    ; drag from a triple-click, which the caption trick below can't.
+    if (Badge && BadgeDot && (hwnd = BadgeDot.Hwnd || hwnd = Badge.Hwnd)) {
+        BadgeDown()
+        return 0
+    }
     if (Comp && CompHead && hwnd = CompHead.Hwnd)
         PostMessage(0xA1, 2, 0, , "ahk_id " Comp.Hwnd)
     else if (SetGui && SetHead && hwnd = SetHead.Hwnd)
@@ -1258,6 +1280,126 @@ UpdateTrayTip() {
 Preview(t) {
     t := RegExReplace(Trim(t), "\s+", " ")
     return StrLen(t) > 45 ? SubStr(t, 1, 45) "…" : t
+}
+
+; ============================================================================
+;  the floating button — a small round thing that sits on top of everything
+;
+;  Click it to open settings, click it again to put them away. Drag it
+;  wherever you want it and it stays there. Triple-click gets rid of it, and
+;  the tray menu brings it back.
+;
+;  Click and drag start the same way, so we can't know which one it was until
+;  the button comes back up: moved = you were dragging, didn't = you clicked.
+; ============================================================================
+ShowBadge() {
+    global Badge, BadgeDot, cfg
+    if Badge
+        return
+    t := ThemeNow()
+    Badge := g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x8000000", "AI Snap button")
+    g.MarginX := 0, g.MarginY := 0         ; E0x8000000 = never takes focus
+    ; Not ApplyTheme here: it asks DWM for rounded corners and a shadow, and
+    ; on a window we're about to clip to a circle that shadow is a grey box
+    ; sitting behind it. 2 = NCRENDERING_POLICY, 1 = disabled.
+    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 2,
+                "int*", 1, "int", 4)
+    g.BackColor := t.accent
+    g.SetFont("s12 w700 c" t.accentText, t.font)
+    ; +0x100 is SS_NOTIFY. Without it a Text control hands mouse messages
+    ; straight to its parent, so the click never arrives here at all.
+    BadgeDot := g.Add("Text", "x0 y0 w48 h48 Center +0x200 +0x80 +0x100"
+                            . " Background" t.accent, "AI")
+    Round(BadgeDot, 24)
+    ; Where you last left it, or out of the way at the bottom right.
+    x := IniRead(cfg, "Look", "BadgeX", A_ScreenWidth - 96)
+    y := IniRead(cfg, "Look", "BadgeY", A_ScreenHeight - 152)
+    g.Show("NoActivate x" OnScreen(x, 48, A_ScreenWidth)
+                  . " y" OnScreen(y, 48, A_ScreenHeight) " w48 h48")
+    Round(g, 24)
+}
+
+; A saved position is only as good as the monitor it was saved on — unplug a
+; screen and it would sit somewhere you can't reach or click.
+OnScreen(v, size, limit) => !IsInteger(v) ? 0 : Min(limit - size, Max(0, v + 0))
+
+HideBadge(remember := false) {
+    global Badge, BadgeDot, cfg
+    if Badge {
+        try Badge.Destroy()
+        Badge := 0, BadgeDot := 0
+    }
+    if remember {
+        IniWrite("0", cfg, "Look", "Button")
+        TrayTip("Button put away", "Tray icon → Show the floating button.", 1)
+    }
+}
+
+ToggleBadge() {
+    global Badge, cfg
+    if Badge
+        HideBadge(true)
+    else {
+        IniWrite("1", cfg, "Look", "Button")
+        ShowBadge()
+    }
+}
+
+; --- press, move, release ----------------------------------------------------
+BadgeDown() {
+    global BadgeFrom, BadgeMoved, Badge
+    CoordMode("Mouse", "Screen")
+    MouseGetPos(&mx, &my)
+    WinGetPos(&wx, &wy, , , "ahk_id " Badge.Hwnd)
+    BadgeFrom := [mx, my, wx, wy]
+    BadgeMoved := false
+    SetTimer(BadgeDrag, 15)
+}
+
+BadgeDrag() {
+    global BadgeFrom, BadgeMoved, Badge
+    if !GetKeyState("LButton", "P") {          ; you let go
+        SetTimer(BadgeDrag, 0)
+        BadgeUp()
+        return
+    }
+    if !Badge {
+        SetTimer(BadgeDrag, 0)
+        return
+    }
+    CoordMode("Mouse", "Screen")
+    MouseGetPos(&mx, &my)
+    ; A few pixels of wobble while clicking isn't a drag.
+    if (!BadgeMoved && Abs(mx - BadgeFrom[1]) + Abs(my - BadgeFrom[2]) < 6)
+        return
+    BadgeMoved := true
+    Badge.Move(BadgeFrom[3] + mx - BadgeFrom[1], BadgeFrom[4] + my - BadgeFrom[2])
+}
+
+BadgeUp() {
+    global Badge, BadgeMoved, BadgeHits, cfg
+    if BadgeMoved {                            ; you were moving it — remember where
+        try {
+            WinGetPos(&x, &y, , , "ahk_id " Badge.Hwnd)
+            IniWrite(x, cfg, "Look", "BadgeX")
+            IniWrite(y, cfg, "Look", "BadgeY")
+        }
+        return
+    }
+    BadgeHits++                                ; a click — but how many is it going to be?
+    SetTimer(BadgeClicked, -400)
+}
+
+BadgeClicked() {
+    global BadgeHits, SetGui
+    hits := BadgeHits
+    BadgeHits := 0
+    if (hits >= 3)
+        HideBadge(true)                        ; three = go away
+    else if SetGui
+        CloseSettings()                        ; open already? then close it
+    else
+        ShowSettings()
 }
 
 ; ============================================================================
