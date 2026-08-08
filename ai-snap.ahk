@@ -45,7 +45,6 @@ global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
 ; global that hasn't been assigned yet stops the whole script dead on an
 ; error box you can't see behind everything else.
 global Badge      := 0        ; the window, 0 when it isn't up
-global BadgeDot   := 0        ; the round control you actually click
 global BadgeWait  := false    ; a click has landed, waiting to see if a second one does
 global BadgeLast  := 0        ; when that click was
 global BadgeAt    := [0, 0]   ; and where, so a second one has to be near it
@@ -1074,10 +1073,10 @@ Attach(label, prev, wait) {
 ; There's no title bar to grab, so dragging the heading moves the card.
 ; 0xA1 = "act like the mouse went down on the caption", 2 = the caption.
 DragCard(wParam, lParam, msg, hwnd) {
-    global Comp, CompHead, SetGui, SetHead, Badge, BadgeDot
+    global Comp, CompHead, SetGui, SetHead, Badge
     ; The floating button does its own thing — it has to tell a click from a
     ; drag from a triple-click, which the caption trick below can't.
-    if (Badge && BadgeDot && (hwnd = BadgeDot.Hwnd || hwnd = Badge.Hwnd)) {
+    if (Badge && hwnd = Badge.Hwnd) {
         ; Windows sends the SECOND click of a double as its own message, once
         ; it has decided the two were close enough in time and place. That's
         ; the real double-click detector, and it means the second click never
@@ -1304,30 +1303,90 @@ Preview(t) {
 ;  the button comes back up: moved = you were dragging, didn't = you clicked.
 ; ============================================================================
 ShowBadge() {
-    global Badge, BadgeDot, cfg
+    global Badge, cfg
     if Badge
         return
     t := ThemeNow()
-    Badge := g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x8000000", "AI Snap button")
-    g.MarginX := 0, g.MarginY := 0         ; E0x8000000 = never takes focus
-    ; Not ApplyTheme here: it asks DWM for rounded corners and a shadow, and
-    ; on a window we're about to clip to a circle that shadow is a grey box
-    ; sitting behind it. 2 = NCRENDERING_POLICY, 1 = disabled.
+    ; E0x8000000 = never takes focus. E0x80000 = layered, and that one is what
+    ; makes the circle a circle: clipping a window to a round region keeps or
+    ; drops whole pixels, so the rim comes out as visible stair-steps. A
+    ; layered window is painted from a bitmap that carries its own alpha, so
+    ; the edge can fade instead of jumping.
+    Badge := g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x8000000 +E0x80000",
+                      "AI Snap button")
+    g.MarginX := 0, g.MarginY := 0
     try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 2,
-                "int*", 1, "int", 4)
-    g.BackColor := t.accent
-    g.SetFont("s12 w700 c" t.accentText, t.font)
-    ; +0x100 is SS_NOTIFY. Without it a Text control hands mouse messages
-    ; straight to its parent, so the click never arrives here at all.
-    BadgeDot := g.Add("Text", "x0 y0 w48 h48 Center +0x200 +0x80 +0x100"
-                            . " Background" t.accent, "AI")
-    Round(BadgeDot, 24)
+                "int*", 1, "int", 4)       ; no square shadow behind it
     ; Where you last left it, or out of the way at the bottom right.
     x := IniRead(cfg, "Look", "BadgeX", A_ScreenWidth - 96)
     y := IniRead(cfg, "Look", "BadgeY", A_ScreenHeight - 152)
     g.Show("NoActivate x" OnScreen(x, 48, A_ScreenWidth)
                   . " y" OnScreen(y, 48, A_ScreenHeight) " w48 h48")
-    Round(g, 24)
+    PaintCircle(g.Hwnd, 48, "0xFF" t.accent, "0xFF" t.accentText, "AI", t.font)
+}
+
+; Draw an anti-aliased filled circle with a label into an ARGB bitmap and hand
+; that to the window. Every pixel carries its own transparency, so the rim
+; fades rather than steps — and the corners outside the circle are completely
+; clear, which also means clicks out there fall through to whatever is behind.
+PaintCircle(hwnd, size, fill, ink, label, font) {
+    static token := 0
+    if !token {
+        si := Buffer(24, 0)
+        NumPut("uint", 1, si, 0)
+        DllCall("gdiplus\GdiplusStartup", "ptr*", &token, "ptr", si, "ptr", 0)
+    }
+    ; a 32-bit top-down bitmap to draw into
+    bi := Buffer(40, 0)
+    NumPut("uint", 40, bi, 0), NumPut("int", size, bi, 4)
+    NumPut("int", -size, bi, 8), NumPut("ushort", 1, bi, 12)
+    NumPut("ushort", 32, bi, 14)
+    dc  := DllCall("CreateCompatibleDC", "ptr", 0, "ptr")
+    bmp := DllCall("CreateDIBSection", "ptr", dc, "ptr", bi, "uint", 0,
+                   "ptr*", &bits := 0, "ptr", 0, "uint", 0, "ptr")
+    old := DllCall("SelectObject", "ptr", dc, "ptr", bmp, "ptr")
+
+    DllCall("gdiplus\GdipCreateFromHDC", "ptr", dc, "ptr*", &gfx := 0)
+    DllCall("gdiplus\GdipSetSmoothingMode", "ptr", gfx, "int", 4)     ; antialias
+    DllCall("gdiplus\GdipSetTextRenderingHint", "ptr", gfx, "int", 4)
+    DllCall("gdiplus\GdipCreateSolidFill", "uint", Integer(fill), "ptr*", &brush := 0)
+    ; inset half a pixel so the edge sits inside the bitmap and has room to fade
+    DllCall("gdiplus\GdipFillEllipse", "ptr", gfx, "ptr", brush,
+            "float", 0.5, "float", 0.5, "float", size - 1.0, "float", size - 1.0)
+
+    DllCall("gdiplus\GdipCreateFontFamilyFromName", "wstr", font, "ptr", 0,
+            "ptr*", &fam := 0)
+    if fam {
+        DllCall("gdiplus\GdipCreateFont", "ptr", fam, "float", size / 3.2,
+                "int", 1, "int", 2, "ptr*", &fnt := 0)         ; bold, in pixels
+        DllCall("gdiplus\GdipCreateStringFormat", "int", 0, "ushort", 0,
+                "ptr*", &fmt := 0)
+        DllCall("gdiplus\GdipSetStringFormatAlign", "ptr", fmt, "int", 1)
+        DllCall("gdiplus\GdipSetStringFormatLineAlign", "ptr", fmt, "int", 1)
+        DllCall("gdiplus\GdipCreateSolidFill", "uint", Integer(ink), "ptr*", &tb := 0)
+        box := Buffer(16, 0)
+        NumPut("float", size, box, 8), NumPut("float", size, box, 12)
+        DllCall("gdiplus\GdipDrawString", "ptr", gfx, "wstr", label, "int", -1,
+                "ptr", fnt, "ptr", box, "ptr", fmt, "ptr", tb)
+        DllCall("gdiplus\GdipDeleteBrush", "ptr", tb)
+        DllCall("gdiplus\GdipDeleteStringFormat", "ptr", fmt)
+        DllCall("gdiplus\GdipDeleteFont", "ptr", fnt)
+        DllCall("gdiplus\GdipDeleteFontFamily", "ptr", fam)
+    }
+
+    sz := Buffer(8, 0)
+    NumPut("int", size, sz, 0), NumPut("int", size, sz, 4)
+    blend := Buffer(4, 0)
+    NumPut("uchar", 255, blend, 2), NumPut("uchar", 1, blend, 3)   ; AC_SRC_ALPHA
+    ; a null destination point leaves the window where it is; 2 = ULW_ALPHA
+    DllCall("UpdateLayeredWindow", "ptr", hwnd, "ptr", 0, "ptr", 0, "ptr", sz,
+            "ptr", dc, "ptr", Buffer(8, 0), "uint", 0, "ptr", blend, "uint", 2)
+
+    DllCall("gdiplus\GdipDeleteBrush", "ptr", brush)
+    DllCall("gdiplus\GdipDeleteGraphics", "ptr", gfx)
+    DllCall("SelectObject", "ptr", dc, "ptr", old)
+    DllCall("DeleteObject", "ptr", bmp)
+    DllCall("DeleteDC", "ptr", dc)
 }
 
 ; A saved position is only as good as the monitor it was saved on — unplug a
@@ -1335,12 +1394,12 @@ ShowBadge() {
 OnScreen(v, size, limit) => !IsInteger(v) ? 0 : Min(limit - size, Max(0, v + 0))
 
 HideBadge(remember := false) {
-    global Badge, BadgeDot, BadgeWait, cfg
+    global Badge, BadgeWait, cfg
     BadgeWait := false
     SetTimer(BadgeClicked, 0)
     if Badge {
         try Badge.Destroy()
-        Badge := 0, BadgeDot := 0
+        Badge := 0
     }
     if remember {
         IniWrite("0", cfg, "Look", "Button")
