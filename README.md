@@ -33,9 +33,11 @@ A small round **AI** button sits on top of everything, so settings are always on
 | **Click it** | Settings open |
 | **Click it again** | Settings close |
 | **Drag it** | Moves anywhere you like, and stays there next time |
-| **Triple-click it** | It goes away |
+| **Double-click it** | It goes away |
 
 Gone and you want it back? Click the tray icon → **Show the floating button**.
+
+A double-click is whatever *you've* set a double-click to be — AI Snap asks Windows for your own speed and wobble tolerance rather than guessing, so two quick clicks in different spots stay two clicks, and a single click never turns into a double by being fast. A single click waits for that window to pass before it opens settings, so double-clicking to dismiss doesn't flash the settings window on its way out.
 
 It never takes focus, so clicking it doesn't interrupt whatever you were typing in. If you unplug a monitor it was living on, it comes back on-screen rather than stranded off the edge.
 
@@ -55,7 +57,7 @@ Under **Filling** in Settings you can change what it presses to move on: **Tab**
 
 ## What's new
 
-- **A floating button.** A small round **AI** on top of everything — click for settings, click again to close, drag it anywhere, triple-click to dismiss. See [The floating button](#the-floating-button).
+- **A floating button.** A small round **AI** on top of everything — click for settings, click again to close, drag it anywhere, double-click to dismiss. See [The floating button](#the-floating-button).
 - **Filling mode.** Alt+9 or a switch in Settings, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
 - **It says hello now.** First run gives you a short card with the three keys, instead of a tray icon and no idea what to do with it.
 - **Your settings are yours.** `config.ini` is no longer in the repo — the defaults ship as `config.example.ini` and get copied on first run, so updating never overwrites your apps and keys.

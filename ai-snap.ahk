@@ -46,7 +46,9 @@ global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
 ; error box you can't see behind everything else.
 global Badge      := 0        ; the window, 0 when it isn't up
 global BadgeDot   := 0        ; the round control you actually click
-global BadgeHits  := 0        ; clicks so far, waiting to see if more arrive
+global BadgeWait  := false    ; a click has landed, waiting to see if a second one does
+global BadgeLast  := 0        ; when that click was
+global BadgeAt    := [0, 0]   ; and where, so a second one has to be near it
 global BadgeFrom  := [0, 0, 0, 0]   ; mouse x,y and window x,y when you pressed
 global BadgeMoved := false
 
@@ -93,6 +95,7 @@ Hotkey(keyFill, ToggleFill)
 ; The little bot, instead of AutoHotkey's H. Missing icon isn't worth dying over.
 try TraySetIcon(A_ScriptDir "\ai-snap.ico")
 OnMessage(0x201, DragCard)                  ; 0x201 = left mouse button down
+OnMessage(0x203, DragCard)                  ; 0x203 = ...and that was a double
 
 ; Enter sends from the composer box (Shift+Enter still makes a new line).
 ; Registered once, and only ever live while that window is the active one.
@@ -1075,7 +1078,15 @@ DragCard(wParam, lParam, msg, hwnd) {
     ; The floating button does its own thing — it has to tell a click from a
     ; drag from a triple-click, which the caption trick below can't.
     if (Badge && BadgeDot && (hwnd = BadgeDot.Hwnd || hwnd = Badge.Hwnd)) {
-        BadgeDown()
+        ; Windows sends the SECOND click of a double as its own message, once
+        ; it has decided the two were close enough in time and place. That's
+        ; the real double-click detector, and it means the second click never
+        ; arrives as an ordinary one — which is why counting them alone
+        ; silently never saw a double at all.
+        if (msg = 0x203)                       ; WM_LBUTTONDBLCLK
+            BadgeDoubled()
+        else
+            BadgeDown()
         return 0
     }
     if (Comp && CompHead && hwnd = CompHead.Hwnd)
@@ -1286,7 +1297,7 @@ Preview(t) {
 ;  the floating button — a small round thing that sits on top of everything
 ;
 ;  Click it to open settings, click it again to put them away. Drag it
-;  wherever you want it and it stays there. Triple-click gets rid of it, and
+;  wherever you want it and it stays there. Double-click gets rid of it, and
 ;  the tray menu brings it back.
 ;
 ;  Click and drag start the same way, so we can't know which one it was until
@@ -1324,7 +1335,9 @@ ShowBadge() {
 OnScreen(v, size, limit) => !IsInteger(v) ? 0 : Min(limit - size, Max(0, v + 0))
 
 HideBadge(remember := false) {
-    global Badge, BadgeDot, cfg
+    global Badge, BadgeDot, BadgeWait, cfg
+    BadgeWait := false
+    SetTimer(BadgeClicked, 0)
     if Badge {
         try Badge.Destroy()
         Badge := 0, BadgeDot := 0
@@ -1376,9 +1389,25 @@ BadgeDrag() {
     Badge.Move(BadgeFrom[3] + mx - BadgeFrom[1], BadgeFrom[4] + my - BadgeFrom[2])
 }
 
+; What counts as a double-click is a thing Windows already knows, because the
+; user set it in Mouse settings: how long you get between the two, and how far
+; the pointer may drift. Ask it rather than inventing numbers — someone who
+; set a slow double-click gets their slow double-click.
+;   36 = SM_CXDOUBLECLK, 37 = SM_CYDOUBLECLK
+DoubleTime()  => DllCall("GetDoubleClickTime", "uint")
+DoubleSlop(i) => DllCall("GetSystemMetrics", "int", i)
+
+; Two clicks are a double-click only if they were BOTH quick enough and close
+; enough together. That second half is what stops one fast click, or two
+; separate clicks either side of the button, being read as a double.
+IsDoubleClick(gap, dx, dy) =>
+    gap <= DoubleTime() && dx <= DoubleSlop(36) && dy <= DoubleSlop(37)
+
 BadgeUp() {
-    global Badge, BadgeMoved, BadgeHits, cfg
+    global Badge, BadgeMoved, BadgeWait, BadgeLast, BadgeAt, cfg
     if BadgeMoved {                            ; you were moving it — remember where
+        BadgeWait := false
+        SetTimer(BadgeClicked, 0)
         try {
             WinGetPos(&x, &y, , , "ahk_id " Badge.Hwnd)
             IniWrite(x, cfg, "Look", "BadgeX")
@@ -1386,20 +1415,36 @@ BadgeUp() {
         }
         return
     }
-    BadgeHits++                                ; a click — but how many is it going to be?
-    SetTimer(BadgeClicked, -400)
+    CoordMode("Mouse", "Screen")
+    MouseGetPos(&mx, &my)
+    if (BadgeWait && IsDoubleClick(A_TickCount - BadgeLast,
+                                   Abs(mx - BadgeAt[1]), Abs(my - BadgeAt[2]))) {
+        BadgeWait := false
+        SetTimer(BadgeClicked, 0)              ; the single click never happens
+        HideBadge(true)                        ; that was a double — off it goes
+        return
+    }
+    ; Might be the first of two. Hold the single-click action until the window
+    ; for a second one has passed, so a double never opens settings on the way.
+    BadgeWait := true, BadgeLast := A_TickCount, BadgeAt := [mx, my]
+    SetTimer(BadgeClicked, -(DoubleTime() + 40))
+}
+
+; Windows has already applied the user's own double-click speed and slop, so
+; there's nothing left to check — call off the pending single click and go.
+BadgeDoubled() {
+    global BadgeWait
+    BadgeWait := false
+    SetTimer(BadgeClicked, 0)
+    HideBadge(true)
 }
 
 BadgeClicked() {
-    global BadgeHits, SetGui
-    hits := BadgeHits
-    BadgeHits := 0
-    if (hits >= 3)
-        HideBadge(true)                        ; three = go away
-    else if SetGui
-        CloseSettings()                        ; open already? then close it
-    else
-        ShowSettings()
+    global BadgeWait, SetGui
+    if !BadgeWait                              ; a double already claimed it
+        return
+    BadgeWait := false
+    SetGui ? CloseSettings() : ShowSettings()  ; open already? then close it
 }
 
 ; ============================================================================
