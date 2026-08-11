@@ -82,6 +82,7 @@ keySel  := IniRead(cfg, "Hotkeys", "CopySelection",  "!3")
 keyAll  := IniRead(cfg, "Hotkeys", "CopyAllOnPage",  "!4")
 keyPost := IniRead(cfg, "Hotkeys", "Post",           "!0")
 keyFill := IniRead(cfg, "Hotkeys", "Fill",           "!9")
+keyBtn  := IniRead(cfg, "Hotkeys", "Button",         "!8")
 
 ; --- bind the hotkeys -------------------------------------------------------
 Hotkey(keyDict, DictateToAI)
@@ -90,6 +91,7 @@ Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
 Hotkey(keyFill, ToggleFill)
+Hotkey(keyBtn,  (*) => ToggleBadge())       ; bring the floating button back
 
 ; The little bot, instead of AutoHotkey's H. Missing icon isn't worth dying over.
 try TraySetIcon(A_ScriptDir "\ai-snap.ico")
@@ -1407,6 +1409,33 @@ HideBadge(remember := false) {
     }
 }
 
+; ---- starting with Windows --------------------------------------------------
+; A shortcut in the Startup folder, which Windows runs when you log in — so
+; it comes back after a shutdown or a restart, and does nothing at all when
+; you just wake the machine, because it never stopped running.
+;
+; No registry, no scheduled task, no admin: it's a file you can see, and
+; deleting it by hand is a perfectly good way to turn this off.
+StartupLink() => A_Startup "\AI Snap.lnk"
+
+StartsWithWindows() => FileExist(StartupLink()) != ""
+
+StartWithWindows(on) {
+    if !on {
+        try FileDelete(StartupLink())
+        Log("startup shortcut removed")
+        return
+    }
+    try {
+        ; A_ScriptFullPath is the .ahk you double-click, or the .exe if you
+        ; compiled it — either way it's the thing to start. The working folder
+        ; matters as much: config.ini is found next to the script.
+        FileCreateShortcut(A_ScriptFullPath, StartupLink(), A_ScriptDir, ,
+                           "AI Snap — snip, copy, send", A_ScriptDir "\ai-snap.ico")
+        Log("startup shortcut written to " StartupLink())
+    }
+}
+
 ToggleBadge() {
     global Badge, cfg
     if Badge
@@ -1597,6 +1626,7 @@ SettingsState() {
     SetPend["all"]     := IniRead(cfg, "Hotkeys",   "CopyAllOnPage", "!4")
     SetPend["post"]    := IniRead(cfg, "Hotkeys",   "Post",          "!0")
     SetPend["fill"]        := IniRead(cfg, "Hotkeys",   "Fill",          "!9")
+    SetPend["button"]      := IniRead(cfg, "Hotkeys",   "Button",        "!8")
     SetPend["dictkey"]     := IniRead(cfg, "Dictation", "Key",           "F4")
     SetPend["comp"]        := IniRead(cfg, "Behavior",  "Composer",      "1")
     SetPend["auto"]        := IniRead(cfg, "Behavior",  "AutoSend",      "1")
@@ -1757,7 +1787,7 @@ ShowSettings(*) {
         picked := picked || (a.name = SetPend["target"])
     appsH := 30 + ((Apps.Length + 1) * RowH + 8) + 14 + 38 + 16
            + (picked ? (2 * RowH + 8) + 14 : 0)
-    keysH := 16 + (6 * RowH + 8) + 14 + (RowH + 8) + 14
+    keysH := 16 + (7 * RowH + 8) + 14 + (RowH + 8) + 14
     WH := 52 + Max(appsH, keysH) + 68          ; header + content + save row
 
     SetGui := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap settings")
@@ -1858,13 +1888,14 @@ ShowSettings(*) {
 
     PageKeys() {
         Note("Click a key to change it. Hold Ctrl, Alt, Shift or Win with it.")
-        Card(6)
-        KeyRow("Talk to my AI",        "dict")
-        KeyRow("Snip a screenshot",    "snip")
-        KeyRow("Send my highlight",    "sel")
-        KeyRow("Select all and send",  "all")
-        KeyRow("Send by hand",         "post")
-        KeyRow("Start filling",        "fill")
+        Card(7)
+        KeyRow("Talk to my AI",         "dict")
+        KeyRow("Snip a screenshot",     "snip")
+        KeyRow("Send my highlight",     "sel")
+        KeyRow("Select all and send",   "all")
+        KeyRow("Send by hand",          "post")
+        KeyRow("Start filling",         "fill")
+        KeyRow("Show the round button", "button")
         Card(1)
         SetCtl["dictkey"] := ed := CardEdit("Push-to-talk key", SetPend["dictkey"],
                                             "the one your dictation app uses")
@@ -1884,7 +1915,11 @@ ShowSettings(*) {
 
     PageOptions() {
         Note("")
-        Card(3)
+        Card(4)
+        ; A real file in the Startup folder, not a saved setting — so this one
+        ; takes effect the moment you click it, Save or no Save.
+        LiveSwitch("Start when Windows does", StartsWithWindows(),
+                   (*) => (StartWithWindows(!StartsWithWindows()), RefreshSettings()))
         CardSwitch("Ask me for a note first", "comp")
         CardSwitch("Send automatically",      "auto")
         CardSwitch("Come back to my window",  "restore")
@@ -2079,6 +2114,7 @@ ShowSettings(*) {
         IniWrite(SetPend["all"],     cfg, "Hotkeys",   "CopyAllOnPage")
         IniWrite(SetPend["post"],    cfg, "Hotkeys",   "Post")
         IniWrite(SetPend["fill"],    cfg, "Hotkeys",   "Fill")
+        IniWrite(SetPend["button"],  cfg, "Hotkeys",   "Button")
         IniWrite(SetPend["dictkey"], cfg, "Dictation", "Key")
         IniWrite(SetPend["comp"],    cfg, "Behavior",  "Composer")
         IniWrite(SetPend["auto"],    cfg, "Behavior",  "AutoSend")

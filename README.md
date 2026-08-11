@@ -35,7 +35,7 @@ A small round **AI** button sits on top of everything, so settings are always on
 | **Drag it** | Moves anywhere you like, and stays there next time |
 | **Double-click it** | It goes away |
 
-Gone and you want it back? Click the tray icon → **Show the floating button**.
+Gone and you want it back? Press **Alt + 8**, or click the tray icon → **Show the floating button**. Same key hides it again.
 
 A double-click is whatever *you've* set a double-click to be — AI Snap asks Windows for your own speed and wobble tolerance rather than guessing, so two quick clicks in different spots stay two clicks, and a single click never turns into a double by being fast. A single click waits for that window to pass before it opens settings, so double-clicking to dismiss doesn't flash the settings window on its way out.
 
@@ -100,6 +100,7 @@ That's it. A small green **H** icon appears in your system tray (bottom-right, n
 | Send everything on the page (select-all) | **Alt + 4** |
 | Send by hand (if auto-send is off) | **Alt + 0** |
 | Start filling — every copy lands in the next cell | **Alt + 9** |
+| Show (or hide) the round floating button | **Alt + 8** |
 
 Typical flow: highlight some text → **Alt+3** → type what you want to ask about it → **Enter**. Or **Alt+2**, drag a box, say your piece, Enter. Never leaving your work.
 
@@ -238,12 +239,13 @@ Apps included out of the box: Claude, ChatGPT, ChatGPT Classic, Antigravity. Del
 
 ---
 
-## Start automatically when Windows boots (optional)
+## Start automatically when Windows boots
 
-1. Press **Win + R**, type `shell:startup`, press Enter.
-2. Right-click `ai-snap.ahk` → **Show more options** → **Create shortcut**, and drop the shortcut into that folder.
+**Settings → Options → Start when Windows does.** That's it — it takes effect the moment you click it, no Save needed.
 
-Now it runs every time you log in.
+It runs when you **log in**, so it's back after a shutdown or a restart. Waking the machine from sleep does nothing, because it never stopped running.
+
+All it does is put a shortcut in your Startup folder — no registry keys, no scheduled task, nothing needing admin. Press **Win + R**, type `shell:startup`, and you can see it sitting there. Deleting it by hand is a perfectly good way to turn this off.
 
 ---
 
