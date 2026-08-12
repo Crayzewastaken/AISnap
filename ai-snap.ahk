@@ -39,6 +39,18 @@ global CompEdit  := 0, CompHead := 0
 global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
 global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
 
+; --- the floating button (see the badge section further down) ---------------
+; Declared up here, not next to its own code: the auto-execute section calls
+; ShowBadge() before it ever reaches that part of the file, and reading a
+; global that hasn't been assigned yet stops the whole script dead on an
+; error box you can't see behind everything else.
+global Badge      := 0        ; the window, 0 when it isn't up
+global BadgeWait  := false    ; a click has landed, waiting to see if a second one does
+global BadgeLast  := 0        ; when that click was
+global BadgeAt    := [0, 0]   ; and where, so a second one has to be near it
+global BadgeFrom  := [0, 0, 0, 0]   ; mouse x,y and window x,y when you pressed
+global BadgeMoved := false
+
 ; --- fill mode (see the fill section further down) --------------------------
 global Filling     := false   ; armed: every copy lands and moves on
 global FillLast    := 0       ; when the last one landed, for the idle timeout
@@ -70,6 +82,7 @@ keySel  := IniRead(cfg, "Hotkeys", "CopySelection",  "!3")
 keyAll  := IniRead(cfg, "Hotkeys", "CopyAllOnPage",  "!4")
 keyPost := IniRead(cfg, "Hotkeys", "Post",           "!0")
 keyFill := IniRead(cfg, "Hotkeys", "Fill",           "!9")
+keyBtn  := IniRead(cfg, "Hotkeys", "Button",         "!8")
 
 ; --- bind the hotkeys -------------------------------------------------------
 Hotkey(keyDict, DictateToAI)
@@ -78,10 +91,12 @@ Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
 Hotkey(keyFill, ToggleFill)
+Hotkey(keyBtn,  (*) => ToggleBadge())       ; bring the floating button back
 
 ; The little bot, instead of AutoHotkey's H. Missing icon isn't worth dying over.
 try TraySetIcon(A_ScriptDir "\ai-snap.ico")
 OnMessage(0x201, DragCard)                  ; 0x201 = left mouse button down
+OnMessage(0x203, DragCard)                  ; 0x203 = ...and that was a double
 
 ; Enter sends from the composer box (Shift+Enter still makes a new line).
 ; Registered once, and only ever live while that window is the active one.
@@ -112,6 +127,7 @@ TrayClick(wParam, lParam, *) {
     }
 }
 A_TrayMenu.Add()
+A_TrayMenu.Add("Show the floating button", (*) => ToggleBadge())
 A_TrayMenu.Add("Get Handy (voice dictation)…", (*) => InstallHandy())
 A_TrayMenu.Add("Edit config.ini directly", (*) => Run(cfg))
 A_TrayMenu.Add("Reload", (*) => Reload())
@@ -125,6 +141,10 @@ if A_IsAdmin
     TrayTip("Running as administrator",
             "AI Snap doesn't need it, and it can reach admin windows this way."
           . " Start it normally instead.", 2)
+
+; The little round button on screen, unless you've put it away.
+if (IniRead(cfg, "Look", "Button", "1") = "1")
+    ShowBadge()
 
 ; Were we filling when the settings window saved and restarted us? Pick it
 ; back up. The flag is consumed on the way in, so starting AI Snap fresh
@@ -1055,7 +1075,21 @@ Attach(label, prev, wait) {
 ; There's no title bar to grab, so dragging the heading moves the card.
 ; 0xA1 = "act like the mouse went down on the caption", 2 = the caption.
 DragCard(wParam, lParam, msg, hwnd) {
-    global Comp, CompHead, SetGui, SetHead
+    global Comp, CompHead, SetGui, SetHead, Badge
+    ; The floating button does its own thing — it has to tell a click from a
+    ; drag from a triple-click, which the caption trick below can't.
+    if (Badge && hwnd = Badge.Hwnd) {
+        ; Windows sends the SECOND click of a double as its own message, once
+        ; it has decided the two were close enough in time and place. That's
+        ; the real double-click detector, and it means the second click never
+        ; arrives as an ordinary one — which is why counting them alone
+        ; silently never saw a double at all.
+        if (msg = 0x203)                       ; WM_LBUTTONDBLCLK
+            BadgeDoubled()
+        else
+            BadgeDown()
+        return 0
+    }
     if (Comp && CompHead && hwnd = CompHead.Hwnd)
         PostMessage(0xA1, 2, 0, , "ahk_id " Comp.Hwnd)
     else if (SetGui && SetHead && hwnd = SetHead.Hwnd)
@@ -1261,6 +1295,247 @@ Preview(t) {
 }
 
 ; ============================================================================
+;  the floating button — a small round thing that sits on top of everything
+;
+;  Click it to open settings, click it again to put them away. Drag it
+;  wherever you want it and it stays there. Double-click gets rid of it, and
+;  the tray menu brings it back.
+;
+;  Click and drag start the same way, so we can't know which one it was until
+;  the button comes back up: moved = you were dragging, didn't = you clicked.
+; ============================================================================
+ShowBadge() {
+    global Badge, cfg
+    if Badge
+        return
+    t := ThemeNow()
+    ; E0x8000000 = never takes focus. E0x80000 = layered, and that one is what
+    ; makes the circle a circle: clipping a window to a round region keeps or
+    ; drops whole pixels, so the rim comes out as visible stair-steps. A
+    ; layered window is painted from a bitmap that carries its own alpha, so
+    ; the edge can fade instead of jumping.
+    Badge := g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x8000000 +E0x80000",
+                      "AI Snap button")
+    g.MarginX := 0, g.MarginY := 0
+    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 2,
+                "int*", 1, "int", 4)       ; no square shadow behind it
+    ; Where you last left it, or out of the way at the bottom right.
+    x := IniRead(cfg, "Look", "BadgeX", A_ScreenWidth - 96)
+    y := IniRead(cfg, "Look", "BadgeY", A_ScreenHeight - 152)
+    g.Show("NoActivate x" OnScreen(x, 48, A_ScreenWidth)
+                  . " y" OnScreen(y, 48, A_ScreenHeight) " w48 h48")
+    PaintCircle(g.Hwnd, 48, "0xFF" t.accent, "0xFF" t.accentText, "AI", t.font)
+}
+
+; Draw an anti-aliased filled circle with a label into an ARGB bitmap and hand
+; that to the window. Every pixel carries its own transparency, so the rim
+; fades rather than steps — and the corners outside the circle are completely
+; clear, which also means clicks out there fall through to whatever is behind.
+PaintCircle(hwnd, size, fill, ink, label, font) {
+    static token := 0
+    if !token {
+        si := Buffer(24, 0)
+        NumPut("uint", 1, si, 0)
+        DllCall("gdiplus\GdiplusStartup", "ptr*", &token, "ptr", si, "ptr", 0)
+    }
+    ; a 32-bit top-down bitmap to draw into
+    bi := Buffer(40, 0)
+    NumPut("uint", 40, bi, 0), NumPut("int", size, bi, 4)
+    NumPut("int", -size, bi, 8), NumPut("ushort", 1, bi, 12)
+    NumPut("ushort", 32, bi, 14)
+    dc  := DllCall("CreateCompatibleDC", "ptr", 0, "ptr")
+    bmp := DllCall("CreateDIBSection", "ptr", dc, "ptr", bi, "uint", 0,
+                   "ptr*", &bits := 0, "ptr", 0, "uint", 0, "ptr")
+    old := DllCall("SelectObject", "ptr", dc, "ptr", bmp, "ptr")
+
+    DllCall("gdiplus\GdipCreateFromHDC", "ptr", dc, "ptr*", &gfx := 0)
+    DllCall("gdiplus\GdipSetSmoothingMode", "ptr", gfx, "int", 4)     ; antialias
+    DllCall("gdiplus\GdipSetTextRenderingHint", "ptr", gfx, "int", 4)
+    DllCall("gdiplus\GdipCreateSolidFill", "uint", Integer(fill), "ptr*", &brush := 0)
+    ; inset half a pixel so the edge sits inside the bitmap and has room to fade
+    DllCall("gdiplus\GdipFillEllipse", "ptr", gfx, "ptr", brush,
+            "float", 0.5, "float", 0.5, "float", size - 1.0, "float", size - 1.0)
+
+    DllCall("gdiplus\GdipCreateFontFamilyFromName", "wstr", font, "ptr", 0,
+            "ptr*", &fam := 0)
+    if fam {
+        DllCall("gdiplus\GdipCreateFont", "ptr", fam, "float", size / 3.2,
+                "int", 1, "int", 2, "ptr*", &fnt := 0)         ; bold, in pixels
+        DllCall("gdiplus\GdipCreateStringFormat", "int", 0, "ushort", 0,
+                "ptr*", &fmt := 0)
+        DllCall("gdiplus\GdipSetStringFormatAlign", "ptr", fmt, "int", 1)
+        DllCall("gdiplus\GdipSetStringFormatLineAlign", "ptr", fmt, "int", 1)
+        DllCall("gdiplus\GdipCreateSolidFill", "uint", Integer(ink), "ptr*", &tb := 0)
+        box := Buffer(16, 0)
+        NumPut("float", size, box, 8), NumPut("float", size, box, 12)
+        DllCall("gdiplus\GdipDrawString", "ptr", gfx, "wstr", label, "int", -1,
+                "ptr", fnt, "ptr", box, "ptr", fmt, "ptr", tb)
+        DllCall("gdiplus\GdipDeleteBrush", "ptr", tb)
+        DllCall("gdiplus\GdipDeleteStringFormat", "ptr", fmt)
+        DllCall("gdiplus\GdipDeleteFont", "ptr", fnt)
+        DllCall("gdiplus\GdipDeleteFontFamily", "ptr", fam)
+    }
+
+    sz := Buffer(8, 0)
+    NumPut("int", size, sz, 0), NumPut("int", size, sz, 4)
+    blend := Buffer(4, 0)
+    NumPut("uchar", 255, blend, 2), NumPut("uchar", 1, blend, 3)   ; AC_SRC_ALPHA
+    ; a null destination point leaves the window where it is; 2 = ULW_ALPHA
+    DllCall("UpdateLayeredWindow", "ptr", hwnd, "ptr", 0, "ptr", 0, "ptr", sz,
+            "ptr", dc, "ptr", Buffer(8, 0), "uint", 0, "ptr", blend, "uint", 2)
+
+    DllCall("gdiplus\GdipDeleteBrush", "ptr", brush)
+    DllCall("gdiplus\GdipDeleteGraphics", "ptr", gfx)
+    DllCall("SelectObject", "ptr", dc, "ptr", old)
+    DllCall("DeleteObject", "ptr", bmp)
+    DllCall("DeleteDC", "ptr", dc)
+}
+
+; A saved position is only as good as the monitor it was saved on — unplug a
+; screen and it would sit somewhere you can't reach or click.
+OnScreen(v, size, limit) => !IsInteger(v) ? 0 : Min(limit - size, Max(0, v + 0))
+
+HideBadge(remember := false) {
+    global Badge, BadgeWait, cfg
+    BadgeWait := false
+    SetTimer(BadgeClicked, 0)
+    if Badge {
+        try Badge.Destroy()
+        Badge := 0
+    }
+    if remember {
+        IniWrite("0", cfg, "Look", "Button")
+        TrayTip("Button put away", "Tray icon → Show the floating button.", 1)
+    }
+}
+
+; ---- starting with Windows --------------------------------------------------
+; A shortcut in the Startup folder, which Windows runs when you log in — so
+; it comes back after a shutdown or a restart, and does nothing at all when
+; you just wake the machine, because it never stopped running.
+;
+; No registry, no scheduled task, no admin: it's a file you can see, and
+; deleting it by hand is a perfectly good way to turn this off.
+StartupLink() => A_Startup "\AI Snap.lnk"
+
+StartsWithWindows() => FileExist(StartupLink()) != ""
+
+StartWithWindows(on) {
+    if !on {
+        try FileDelete(StartupLink())
+        Log("startup shortcut removed")
+        return
+    }
+    try {
+        ; A_ScriptFullPath is the .ahk you double-click, or the .exe if you
+        ; compiled it — either way it's the thing to start. The working folder
+        ; matters as much: config.ini is found next to the script.
+        FileCreateShortcut(A_ScriptFullPath, StartupLink(), A_ScriptDir, ,
+                           "AI Snap — snip, copy, send", A_ScriptDir "\ai-snap.ico")
+        Log("startup shortcut written to " StartupLink())
+    }
+}
+
+ToggleBadge() {
+    global Badge, cfg
+    if Badge
+        HideBadge(true)
+    else {
+        IniWrite("1", cfg, "Look", "Button")
+        ShowBadge()
+    }
+}
+
+; --- press, move, release ----------------------------------------------------
+BadgeDown() {
+    global BadgeFrom, BadgeMoved, Badge
+    CoordMode("Mouse", "Screen")
+    MouseGetPos(&mx, &my)
+    WinGetPos(&wx, &wy, , , "ahk_id " Badge.Hwnd)
+    BadgeFrom := [mx, my, wx, wy]
+    BadgeMoved := false
+    SetTimer(BadgeDrag, 15)
+}
+
+BadgeDrag() {
+    global BadgeFrom, BadgeMoved, Badge
+    if !GetKeyState("LButton", "P") {          ; you let go
+        SetTimer(BadgeDrag, 0)
+        BadgeUp()
+        return
+    }
+    if !Badge {
+        SetTimer(BadgeDrag, 0)
+        return
+    }
+    CoordMode("Mouse", "Screen")
+    MouseGetPos(&mx, &my)
+    ; A few pixels of wobble while clicking isn't a drag.
+    if (!BadgeMoved && Abs(mx - BadgeFrom[1]) + Abs(my - BadgeFrom[2]) < 6)
+        return
+    BadgeMoved := true
+    Badge.Move(BadgeFrom[3] + mx - BadgeFrom[1], BadgeFrom[4] + my - BadgeFrom[2])
+}
+
+; What counts as a double-click is a thing Windows already knows, because the
+; user set it in Mouse settings: how long you get between the two, and how far
+; the pointer may drift. Ask it rather than inventing numbers — someone who
+; set a slow double-click gets their slow double-click.
+;   36 = SM_CXDOUBLECLK, 37 = SM_CYDOUBLECLK
+DoubleTime()  => DllCall("GetDoubleClickTime", "uint")
+DoubleSlop(i) => DllCall("GetSystemMetrics", "int", i)
+
+; Two clicks are a double-click only if they were BOTH quick enough and close
+; enough together. That second half is what stops one fast click, or two
+; separate clicks either side of the button, being read as a double.
+IsDoubleClick(gap, dx, dy) =>
+    gap <= DoubleTime() && dx <= DoubleSlop(36) && dy <= DoubleSlop(37)
+
+BadgeUp() {
+    global Badge, BadgeMoved, BadgeWait, BadgeLast, BadgeAt, cfg
+    if BadgeMoved {                            ; you were moving it — remember where
+        BadgeWait := false
+        SetTimer(BadgeClicked, 0)
+        try {
+            WinGetPos(&x, &y, , , "ahk_id " Badge.Hwnd)
+            IniWrite(x, cfg, "Look", "BadgeX")
+            IniWrite(y, cfg, "Look", "BadgeY")
+        }
+        return
+    }
+    CoordMode("Mouse", "Screen")
+    MouseGetPos(&mx, &my)
+    if (BadgeWait && IsDoubleClick(A_TickCount - BadgeLast,
+                                   Abs(mx - BadgeAt[1]), Abs(my - BadgeAt[2]))) {
+        BadgeWait := false
+        SetTimer(BadgeClicked, 0)              ; the single click never happens
+        HideBadge(true)                        ; that was a double — off it goes
+        return
+    }
+    ; Might be the first of two. Hold the single-click action until the window
+    ; for a second one has passed, so a double never opens settings on the way.
+    BadgeWait := true, BadgeLast := A_TickCount, BadgeAt := [mx, my]
+    SetTimer(BadgeClicked, -(DoubleTime() + 40))
+}
+
+; Windows has already applied the user's own double-click speed and slop, so
+; there's nothing left to check — call off the pending single click and go.
+BadgeDoubled() {
+    global BadgeWait
+    BadgeWait := false
+    SetTimer(BadgeClicked, 0)
+    HideBadge(true)
+}
+
+BadgeClicked() {
+    global BadgeWait, SetGui
+    if !BadgeWait                              ; a double already claimed it
+        return
+    BadgeWait := false
+    SetGui ? CloseSettings() : ShowSettings()  ; open already? then close it
+}
+
+; ============================================================================
 ;  first run — a short hello, once
 ;
 ;  Nothing about this app is visible until you press a key, so without this
@@ -1351,6 +1626,7 @@ SettingsState() {
     SetPend["all"]     := IniRead(cfg, "Hotkeys",   "CopyAllOnPage", "!4")
     SetPend["post"]    := IniRead(cfg, "Hotkeys",   "Post",          "!0")
     SetPend["fill"]        := IniRead(cfg, "Hotkeys",   "Fill",          "!9")
+    SetPend["button"]      := IniRead(cfg, "Hotkeys",   "Button",        "!8")
     SetPend["dictkey"]     := IniRead(cfg, "Dictation", "Key",           "F4")
     SetPend["comp"]        := IniRead(cfg, "Behavior",  "Composer",      "1")
     SetPend["auto"]        := IniRead(cfg, "Behavior",  "AutoSend",      "1")
@@ -1511,7 +1787,7 @@ ShowSettings(*) {
         picked := picked || (a.name = SetPend["target"])
     appsH := 30 + ((Apps.Length + 1) * RowH + 8) + 14 + 38 + 16
            + (picked ? (2 * RowH + 8) + 14 : 0)
-    keysH := 16 + (6 * RowH + 8) + 14 + (RowH + 8) + 14
+    keysH := 16 + (7 * RowH + 8) + 14 + (RowH + 8) + 14
     WH := 52 + Max(appsH, keysH) + 68          ; header + content + save row
 
     SetGui := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap settings")
@@ -1612,13 +1888,14 @@ ShowSettings(*) {
 
     PageKeys() {
         Note("Click a key to change it. Hold Ctrl, Alt, Shift or Win with it.")
-        Card(6)
-        KeyRow("Talk to my AI",        "dict")
-        KeyRow("Snip a screenshot",    "snip")
-        KeyRow("Send my highlight",    "sel")
-        KeyRow("Select all and send",  "all")
-        KeyRow("Send by hand",         "post")
-        KeyRow("Start filling",        "fill")
+        Card(7)
+        KeyRow("Talk to my AI",         "dict")
+        KeyRow("Snip a screenshot",     "snip")
+        KeyRow("Send my highlight",     "sel")
+        KeyRow("Select all and send",   "all")
+        KeyRow("Send by hand",          "post")
+        KeyRow("Start filling",         "fill")
+        KeyRow("Show the round button", "button")
         Card(1)
         SetCtl["dictkey"] := ed := CardEdit("Push-to-talk key", SetPend["dictkey"],
                                             "the one your dictation app uses")
@@ -1638,7 +1915,11 @@ ShowSettings(*) {
 
     PageOptions() {
         Note("")
-        Card(3)
+        Card(4)
+        ; A real file in the Startup folder, not a saved setting — so this one
+        ; takes effect the moment you click it, Save or no Save.
+        LiveSwitch("Start when Windows does", StartsWithWindows(),
+                   (*) => (StartWithWindows(!StartsWithWindows()), RefreshSettings()))
         CardSwitch("Ask me for a note first", "comp")
         CardSwitch("Send automatically",      "auto")
         CardSwitch("Come back to my window",  "restore")
@@ -1833,6 +2114,7 @@ ShowSettings(*) {
         IniWrite(SetPend["all"],     cfg, "Hotkeys",   "CopyAllOnPage")
         IniWrite(SetPend["post"],    cfg, "Hotkeys",   "Post")
         IniWrite(SetPend["fill"],    cfg, "Hotkeys",   "Fill")
+        IniWrite(SetPend["button"],  cfg, "Hotkeys",   "Button")
         IniWrite(SetPend["dictkey"], cfg, "Dictation", "Key")
         IniWrite(SetPend["comp"],    cfg, "Behavior",  "Composer")
         IniWrite(SetPend["auto"],    cfg, "Behavior",  "AutoSend")
