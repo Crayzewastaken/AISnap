@@ -1031,9 +1031,13 @@ ThemeButton(g, t, label, opts, cb, primary := false) {
 ; the prototype, and you get "Invalid base" instead of a button.
 ; Keep the raw hwnd: once a window is destroyed, asking the control object for
 ; its .Hwnd throws, so that number is the only safe way to check it's still there.
-Hover(ctrl, cold, hot) {
+; A "mate" is a second control that lights up with this one — a row is a
+; rounded plate with the job's text laid on top of it, and half a row
+; highlighting is worse than none.
+Hover(ctrl, cold, hot, mate := 0) {
     global HoverBtns
-    HoverBtns.Push({ ctrl: ctrl, hwnd: ctrl.Hwnd, cold: cold, hot: hot })
+    HoverBtns.Push({ ctrl: ctrl, hwnd: ctrl.Hwnd, cold: cold, hot: hot,
+                     mate: mate })
     SetTimer(HoverCheck, 70)
 }
 
@@ -1057,10 +1061,13 @@ HoverCheck() {
         ; Only the one you've just left and the one you've just arrived at can
         ; have changed. Repainting all of them was a whole-card flash every
         ; time the pointer crossed anything, forty times over.
-        if (b.hwnd != under && b.hwnd != was)
+        mate := 0
+        try mate := b.mate ? b.mate.Hwnd : 0
+        if (b.hwnd != under && b.hwnd != was && mate != under && mate != was)
             continue
         try {
-            b.ctrl.Opt("Background" (under = b.hwnd ? b.hot : b.cold))
+            lit := (under = b.hwnd || (mate && under = mate))
+            b.ctrl.Opt("Background" (lit ? b.hot : b.cold))
             b.ctrl.Redraw()
         }
     }
@@ -1556,18 +1563,28 @@ ShowTodo() {
 ; fills in when it's done. The job itself toggles too, because aiming for a
 ; 32-pixel target to tick something off is a tax.
 TodoRow(g, t, i, it) {
+    ; Two controls, not one: a rounded plate, and the job's text laid on top
+    ; of it with a bit of a gap at the left. Padding the string with spaces
+    ; was simpler, but the line through a finished job is drawn across the
+    ; whole string — spaces and all — so it started before the first letter.
+    chip := g.Add("Text", "xm y+8 w220 h30 Background" t.panel)
+    chip.OnEvent("Click", TodoToggler(i))
+    Round(chip, 8)
     ; "norm" first, or the strikethrough on a ticked row sticks to every
     ; control drawn after it — including the arrow and the tick.
     g.SetFont("s10 " (it.done ? "strike c" t.dim : "norm c" t.text))
-    chip := g.Add("Text", "xm y+8 w220 h30 +0x200 +0x80 +0x4000 Background" t.panel,
-                  "  " it.text)
-    chip.OnEvent("Click", TodoToggler(i))
-    Round(chip, 8)
-    Hover(chip, t.panel, t.panelHot)
+    label := g.Add("Text", "xp+10 yp+6 w200 h18 +0x200 +0x4000 Background" t.panel,
+                   it.text)
+    label.OnEvent("Click", TodoToggler(i))
+    Hover(chip, t.panel, t.panelHot, label)
+    Hover(label, t.panel, t.panelHot, chip)
 
+    ; The arrow and the tick hang off the PLATE, not off the label sitting on
+    ; it, so ask where the plate ended up rather than measuring from the text.
+    chip.GetPos(&cx, &cy)
     g.SetFont("s11 norm c" (it.done ? t.dim : t.accent))
-    send := g.Add("Text", "x+8 yp w32 h30 Center +0x200 +0x80 Background" t.panel,
-                  "→")
+    send := g.Add("Text", "x" (cx + 228) " y" cy
+                        . " w32 h30 Center +0x200 +0x80 Background" t.panel, "→")
     send.OnEvent("Click", TodoSender(i))
     Round(send, 8)
     Hover(send, t.panel, t.panelHot)
