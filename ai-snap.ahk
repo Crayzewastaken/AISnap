@@ -48,6 +48,7 @@ global Todo      := 0     ; the card, and it's meant to be up the whole time
 global TodoItems := []    ; what's on it: [{text, done}]
 global TodoEdit  := 0, TodoHead := 0
 global TodoBmp   := 0     ; the AI circle, drawn once and kept
+global SwitchBmp := Map() ; on and off switches, drawn once per theme
 global TodoPrev  := 0     ; what you were working in before you clicked the hub
 global TodoOpen  := IniRead(cfg, "Look", "DoneOpen", "0") = "1"   ; done list showing?
 global TodoArmed := false ; the clear link has asked whether you meant it
@@ -987,6 +988,13 @@ ThemeNow() {
 ; that overlap a sibling, and every row in the settings card sits on a panel.
 ApplyTheme(g, t) {
     g.Opt("+0x2000000")
+    ; Windows fades a new window in on the way up. Every card in here is
+    ; rebuilt on every click — pick a page, tick a switch, add a job — and a
+    ; fade on each of those rebuilds is the flicker. The cards are meant to
+    ; change, not to reappear.
+    ;   3 = DWMWA_TRANSITIONS_FORCEDISABLED
+    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 3,
+                "int*", 1, "int", 4)
     g.BackColor := t.bg
     g.SetFont("s10 c" t.text, t.font)
     ; 20 = dark title bar (for windows that still have one)
@@ -1174,9 +1182,10 @@ RebuildComposer() {
         return
     CompNote := CompEdit.Value
     prev := CompPrev
-    Comp.Destroy()
-    Comp := 0
+    old := Comp                       ; new box up first, then the old one goes,
+    Comp := 0                         ; so there's never a hole where it was
     ShowComposer(prev)
+    try old.Destroy()
 }
 
 ; One remover per chip. It's a function so each ✕ keeps its own number —
@@ -1314,17 +1323,23 @@ Preview(t) {
 ;  the circle with it. Click it for settings, same as it ever did.
 ; ============================================================================
 
-; Draw an anti-aliased filled circle with a label and hand back the bitmap.
-; A control can't blend per-pixel alpha, so the circle is painted onto the
-; card's own background colour instead — same flat colour behind it either
-; way, so the rim still fades rather than stepping.
-CircleBitmap(size, fill, ink, label, font, backdrop) {
+; GDI+ starts once, and everything drawn by hand goes through here first.
+GdiPlus() {
     static token := 0
     if !token {
         si := Buffer(24, 0)
         NumPut("uint", 1, si, 0)
         DllCall("gdiplus\GdiplusStartup", "ptr*", &token, "ptr", si, "ptr", 0)
     }
+    return token
+}
+
+; Draw an anti-aliased filled circle with a label and hand back the bitmap.
+; A control can't blend per-pixel alpha, so the circle is painted onto the
+; card's own background colour instead — same flat colour behind it either
+; way, so the rim still fades rather than stepping.
+CircleBitmap(size, fill, ink, label, font, backdrop) {
+    GdiPlus()
     ; a 32-bit top-down bitmap to draw into
     bi := Buffer(40, 0)
     NumPut("uint", 40, bi, 0), NumPut("int", size, bi, 4)
@@ -1368,6 +1383,48 @@ CircleBitmap(size, fill, ink, label, font, backdrop) {
     DllCall("gdiplus\GdipDeleteGraphics", "ptr", gfx)
     DllCall("SelectObject", "ptr", dc, "ptr", old)     ; let go of it, don't
     DllCall("DeleteDC", "ptr", dc)                     ; delete it — it's the picture
+    return bmp
+}
+
+; The on/off switch: a pill with a knob parked at one end, drawn rather than
+; built out of controls. Clipping a control to a rounded region comes out
+; square on these boxes, and a knob laid over a track is two siblings fighting
+; over the same pixels — so it's one picture, and it looks like a switch.
+SwitchBitmap(w, h, on, track, knob, backdrop) {
+    GdiPlus()
+    bi := Buffer(40, 0)
+    NumPut("uint", 40, bi, 0), NumPut("int", w, bi, 4)
+    NumPut("int", -h, bi, 8), NumPut("ushort", 1, bi, 12)
+    NumPut("ushort", 32, bi, 14)
+    dc  := DllCall("CreateCompatibleDC", "ptr", 0, "ptr")
+    bmp := DllCall("CreateDIBSection", "ptr", dc, "ptr", bi, "uint", 0,
+                   "ptr*", &bits := 0, "ptr", 0, "uint", 0, "ptr")
+    old := DllCall("SelectObject", "ptr", dc, "ptr", bmp, "ptr")
+
+    DllCall("gdiplus\GdipCreateFromHDC", "ptr", dc, "ptr*", &gfx := 0)
+    DllCall("gdiplus\GdipSetSmoothingMode", "ptr", gfx, "int", 4)     ; antialias
+    DllCall("gdiplus\GdipGraphicsClear", "ptr", gfx, "uint", Integer(backdrop))
+
+    ; the track — a bar with a half-circle capping each end
+    DllCall("gdiplus\GdipCreateSolidFill", "uint", Integer(track), "ptr*", &tb := 0)
+    DllCall("gdiplus\GdipFillRectangle", "ptr", gfx, "ptr", tb,
+            "float", h / 2.0, "float", 0.5, "float", w - h, "float", h - 1.0)
+    DllCall("gdiplus\GdipFillEllipse", "ptr", gfx, "ptr", tb,
+            "float", 0.5, "float", 0.5, "float", h - 1.0, "float", h - 1.0)
+    DllCall("gdiplus\GdipFillEllipse", "ptr", gfx, "ptr", tb,
+            "float", w - h + 0.5, "float", 0.5, "float", h - 1.0, "float", h - 1.0)
+
+    ; the knob, parked at whichever end it belongs to
+    d := h - 8
+    DllCall("gdiplus\GdipCreateSolidFill", "uint", Integer(knob), "ptr*", &kb := 0)
+    DllCall("gdiplus\GdipFillEllipse", "ptr", gfx, "ptr", kb,
+            "float", (on ? w - h + 4 : 4), "float", 4, "float", d, "float", d)
+
+    DllCall("gdiplus\GdipDeleteBrush", "ptr", kb)
+    DllCall("gdiplus\GdipDeleteBrush", "ptr", tb)
+    DllCall("gdiplus\GdipDeleteGraphics", "ptr", gfx)
+    DllCall("SelectObject", "ptr", dc, "ptr", old)
+    DllCall("DeleteDC", "ptr", dc)
     return bmp
 }
 
@@ -1475,12 +1532,6 @@ ShowTodo() {
     t := ThemeNow()
     Todo := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap to-do list")
     g.MarginX := 16, g.MarginY := 14
-    ; Windows fades a new window in on the way up. The card is built again
-    ; every time you tick a job or fold the drawer, and a fade on every one of
-    ; those is the flicker — the card is meant to change, not reappear.
-    ;   3 = DWMWA_TRANSITIONS_FORCEDISABLED
-    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 3,
-                "int*", 1, "int", 4)
     ApplyTheme(g, t)
 
     left := 0, done := 0
@@ -2228,21 +2279,19 @@ ShowSettings(*) {
         return p
     }
 
-    ; An iOS-style switch: a rounded track with a round knob parked at one end.
-    ; Two controls, because a Windows checkbox will not be talked into this.
-    ; One control, not two. A knob drawn as a second control on top of the
-    ; track is a sibling overlapping a sibling, and that is exactly what this
-    ; window can't do — so the knob is a character shoved to one end instead.
+    ; The switch is a picture, drawn by SwitchBitmap. One per state per theme,
+    ; kept — this card is rebuilt on every click in it, and redrawing four
+    ; switches each time is work nobody sees.
     OnOff(x, y, on, cb) {
-        g.SetFont("s13 c" (on ? t.accentText : t.dim))
-        sw := g.Add("Text", "x" x " y" (y + 11) " w48 h24 +0x200 +0x80 "
-                  . (on ? "Right" : "Left")
-                  . " Background" (on ? t.accent : t.panelHot), on ? "●  " : "  ●")
+        global SwitchBmp
+        key := (on ? "on|" : "off|") t.accent t.panelHot
+        if !SwitchBmp.Has(key)
+            SwitchBmp[key] := SwitchBitmap(48, 26, on,
+                "0xFF" (on ? t.accent : t.panelHot),
+                "0xFF" (on ? t.accentText : t.dim), "0xFF" t.panel)
+        sw := g.Add("Picture", "x" x " y" (y + 10) " w48 h26 +0x100",
+                    "HBITMAP:*" SwitchBmp[key])
         sw.OnEvent("Click", cb)
-        Round(sw, 12)
-        if !on
-            Hover(sw, t.panelHot, t.panel)
-        g.SetFont("s10 c" t.text)
     }
 
     ; Anything sitting on a card has to be painted the card's colour. A Text
