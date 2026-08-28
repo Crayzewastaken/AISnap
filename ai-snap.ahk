@@ -49,6 +49,7 @@ global TodoItems := []    ; what's on it: [{text, done}]
 global TodoEdit  := 0, TodoHead := 0
 global TodoBmp   := 0     ; the AI circle, drawn once and kept
 global TodoPrev  := 0     ; what you were working in before you clicked the hub
+global TodoOpen  := IniRead(cfg, "Look", "DoneOpen", "0") = "1"   ; done list showing?
 
 ; Hover highlighting keeps its list here (see the hover section further down).
 ; Same reason again: the to-do card is drawn from the auto-execute section.
@@ -1501,19 +1502,31 @@ ShowTodo() {
         g.SetFont("s9 c" t.dim)
         g.Add("Text", "xm y+14 w300", "Nothing on the list. Type above, Enter adds it.")
     }
-    ; Still to do at the top, ticked ones underneath, so the next job is
-    ; always the first thing you see.
+    ; What's still to do, and only that. Finished work is worth being able to
+    ; look at, but not worth carrying at the top of your screen all day.
     for i, it in TodoItems
         if !it.done
             TodoRow(g, t, i, it)
-    for i, it in TodoItems
-        if it.done
-            TodoRow(g, t, i, it)
 
+    ; Done, folded away. Click the row to open it, click it again to fold it
+    ; back, and it stays however you left it next time.
     if done {
         g.SetFont("s9 norm c" t.dim)
-        c := g.Add("Text", "xm y+12 w300 Center +0x100 +0x80", "Clear " done " done")
-        c.OnEvent("Click", (*) => TodoClearDone())
+        fold := g.Add("Text", "xm y+14 w300 h24 +0x200 +0x100 +0x80 Background" t.panel
+                            . " c" t.dim,
+                      (TodoOpen ? "  ▾  Done (" : "  ▸  Done (") done ")")
+        fold.OnEvent("Click", (*) => TodoToggleDone())
+        Round(fold, 8)
+        Hover(fold, t.panel, t.panelHot)
+        if TodoOpen {
+            for i, it in TodoItems
+                if it.done
+                    TodoRow(g, t, i, it)
+            g.SetFont("s9 norm c" t.dim)
+            c := g.Add("Text", "xm y+12 w300 Center +0x100 +0x80",
+                       "Clear " done " done")
+            c.OnEvent("Click", (*) => TodoClearDone())
+        }
     }
 
     ; The two ways Windows offers to make a window go away, both refused.
@@ -1636,6 +1649,15 @@ TodoAdd(*) {
     SaveTodo()
     Log("todo added — " TodoItems.Length " on the list")
     RebuildTodo(true)             ; still typing, so stay in the box
+}
+
+; Fold the finished work away, or open it up. Remembered, because a list you
+; keep having to re-tidy is a list you stop using.
+TodoToggleDone() {
+    global TodoOpen, cfg
+    TodoOpen := !TodoOpen
+    IniWrite(TodoOpen ? "1" : "0", cfg, "Look", "DoneOpen")
+    RebuildTodo()
 }
 
 TodoClearDone() {

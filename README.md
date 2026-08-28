@@ -34,9 +34,10 @@ One small card sits on top of everything: the round orange **AI** button and you
 | **Click the AI circle** | Settings open. Click it again and they close |
 | **Type + Enter** | Adds the job to the list |
 | **Click the → on a job** | Sends that job to your AI as its own message |
-| **Click a job** | Ticks it off — it drops to the bottom, struck through |
+| **Click a job** | Ticks it off — it moves into **Done**, out of the way |
+| **Click "Done (N)"** | Folds your finished work open, or shut again |
 | **Click a ticked one** | Puts it back on the list |
-| **Clear N done** | Bins the ticked ones |
+| **Clear N done** | Bins the ticked ones, once Done is open |
 | **Drag the heading** | Moves the whole hub, circle and all, and it stays there next time |
 | **Alt + 7** | Puts the cursor in the box from wherever you are |
 | **Alt + 8** | Settings, without reaching for the mouse |
@@ -51,7 +52,13 @@ You clicked an arrow that means send, so it sends. Turning auto-send off changes
 
 The job stays on the list afterwards. Tick it off when what came back is good, or hit the arrow again to ask twice.
 
-Still-to-do jobs sit at the top and ticked ones underneath, so the next thing is always the first thing you see. The count in the corner is how many are left.
+### Done
+
+Ticked jobs move into a **Done (N)** row at the bottom, folded shut. Click it and everything you've finished unfolds, struck through, newest work and all — click it again and it's gone back to one quiet line. It stays however you left it, so a hub you keep folded stays folded through a restart.
+
+Open, each finished job still has its arrow and its tick: send it again, or put it back on the list if it turns out it wasn't done after all. **Clear N done** bins the lot.
+
+The hub only ever shows what's left to do at full size. The count in the corner is how many that is.
 
 Your jobs live in **`todo.txt`** next to the script — one per line, `x ` in front of the done ones. It's a plain text file you can open in Notepad and edit by hand, and it's read back the moment AI Snap starts, so a restart, a reboot or a crash never loses your list.
 
@@ -75,6 +82,7 @@ Under **Filling** in Settings you can change what it presses to move on: **Tab**
 
 - **The hub.** The round **AI** button and a to-do list, one card on top of everything. Type a job, press Enter, click it when it's done. Click the circle for settings. No close button anywhere on it, on purpose. See [The hub](#the-hub).
 - **Send a job to your AI.** Every job on the list has a **→**. Click it and that line goes to your selected app as a message, and sends. Write the job as the ask and let the AI do it.
+- **A Done drawer.** Everything you've ticked off, folded into one line at the bottom. Click it open when you want to see what you got through, fold it away when you don't.
 - **Filling mode.** Alt+9 or a switch in Settings, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
 - **It says hello now.** First run gives you a short card with the three keys, instead of a tray icon and no idea what to do with it.
 - **Your settings are yours.** `config.ini` is no longer in the repo — the defaults ship as `config.example.ini` and get copied on first run, so updating never overwrites your apps and keys.
