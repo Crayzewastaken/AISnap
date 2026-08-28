@@ -1499,10 +1499,16 @@ ShowTodo() {
     g.SetFont("s9 c" t.dim)
     g.Add("Text", "x+0 yp w84 h36 Right +0x200", left " left")
 
+    ; The box you type in. A single-line edit parks its text hard against the
+    ; top of itself, so the rounded box is its own control and the edit sits
+    ; centred on top of it, borderless and the same colour. Clicking the box
+    ; anywhere lands you in the edit, which is what it looks like it does.
     g.SetFont("s10 c" t.text)
-    TodoEdit := g.Add("Edit", "xm y+10 w300 h30 -E0x200 Background" t.panel
+    box := g.Add("Text", "xm y+10 w300 h30 Background" t.panel)
+    Round(box, 8)
+    TodoEdit := g.Add("Edit", "xp+10 yp+5 w280 h20 -E0x200 -VScroll Background" t.panel
                             . " c" t.text)
-    Round(TodoEdit, 8)
+    box.OnEvent("Click", (*) => TodoEdit.Focus())
 
     if !TodoItems.Length {
         g.SetFont("s9 c" t.dim)
