@@ -50,6 +50,7 @@ global TodoEdit  := 0, TodoHead := 0
 global TodoBmp   := 0     ; the AI circle, drawn once and kept
 global TodoPrev  := 0     ; what you were working in before you clicked the hub
 global TodoOpen  := IniRead(cfg, "Look", "DoneOpen", "0") = "1"   ; done list showing?
+global TodoArmed := false ; the clear link has asked whether you meant it
 
 ; Hover highlighting keeps its list here (see the hover section further down).
 ; Same reason again: the to-do card is drawn from the auto-execute section.
@@ -1541,10 +1542,21 @@ ShowTodo() {
             for i, it in TodoItems
                 if it.done
                     TodoRow(g, t, i, it)
-            g.SetFont("s9 norm c" t.dim)
-            c := g.Add("Text", "xm y+12 w300 Center +0x100 +0x80",
-                       "Clear " done " done")
-            c.OnEvent("Click", (*) => TodoClearDone())
+            ; Clearing is the one thing here you can't undo, so it asks first.
+            ; The quiet link becomes two real buttons, and the one that bins
+            ; your work is the one you have to aim at a second time.
+            if TodoArmed {
+                g.SetFont("s10 norm")
+                ThemeButton(g, t, "Clear " done, "xm y+12 w146 h32",
+                            (*) => TodoClearDone(), true)
+                ThemeButton(g, t, "Keep them", "x+8 yp w146 h32",
+                            (*) => TodoDisarm())
+            } else {
+                g.SetFont("s9 norm c" t.dim)
+                c := g.Add("Text", "xm y+12 w300 Center +0x100 +0x80",
+                           "Clear " done " done")
+                c.OnEvent("Click", (*) => TodoArmClear())
+            }
         }
     }
 
@@ -1639,7 +1651,8 @@ TodoSend(i) {
 }
 
 TodoToggle(i) {
-    global TodoItems
+    global TodoItems, TodoArmed
+    TodoArmed := false             ; you went and did something else
     if (i > TodoItems.Length)
         return
     TodoItems[i].done := !TodoItems[i].done
@@ -1672,7 +1685,8 @@ RebuildTodo(focus := false) {
 }
 
 TodoAdd(*) {
-    global TodoItems, TodoEdit
+    global TodoItems, TodoEdit, TodoArmed
+    TodoArmed := false
     if !TodoEdit
         return
     ; The keyboard hook hands us Enter before the box has drawn the last few
@@ -1692,14 +1706,34 @@ TodoAdd(*) {
 ; Fold the finished work away, or open it up. Remembered, because a list you
 ; keep having to re-tidy is a list you stop using.
 TodoToggleDone() {
-    global TodoOpen, cfg
+    global TodoOpen, TodoArmed, cfg
+    TodoArmed := false
     TodoOpen := !TodoOpen
     IniWrite(TodoOpen ? "1" : "0", cfg, "Look", "DoneOpen")
     RebuildTodo()
 }
 
+; Ask first. It puts itself away again after a few seconds, so a stray click
+; on the link never leaves a live "clear everything" button sitting there.
+TodoArmClear() {
+    global TodoArmed
+    TodoArmed := true
+    SetTimer(TodoDisarm, -5000)
+    RebuildTodo()
+}
+
+TodoDisarm(*) {
+    global TodoArmed, Todo
+    if !TodoArmed
+        return
+    TodoArmed := false
+    if Todo
+        RebuildTodo()
+}
+
 TodoClearDone() {
-    global TodoItems
+    global TodoItems, TodoArmed
+    TodoArmed := false
     kept := []
     for it in TodoItems
         if !it.done

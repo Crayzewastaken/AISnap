@@ -37,7 +37,7 @@ One small card sits on top of everything: the round orange **AI** button and you
 | **Click a job** | Ticks it off — it moves into **Done**, out of the way |
 | **Click "Done (N)"** | Folds your finished work open, or shut again |
 | **Click a ticked one** | Puts it back on the list |
-| **Clear N done** | Bins the ticked ones, once Done is open |
+| **Clear N done** | Bins the ticked ones — asks first, once Done is open |
 | **Drag the heading** | Moves the whole hub, circle and all, and it stays there next time |
 | **Alt + 7** | Puts the cursor in the box from wherever you are |
 | **Alt + 8** | Settings, without reaching for the mouse |
@@ -56,7 +56,9 @@ The job stays on the list afterwards. Tick it off when what came back is good, o
 
 Ticked jobs move into a **Done (N)** row at the bottom, folded shut. Click it and everything you've finished unfolds, struck through, newest work and all — click it again and it's gone back to one quiet line. It stays however you left it, so a hub you keep folded stays folded through a restart.
 
-Open, each finished job still has its arrow and its tick: send it again, or put it back on the list if it turns out it wasn't done after all. **Clear N done** bins the lot.
+Open, each finished job still has its arrow and its tick: send it again, or put it back on the list if it turns out it wasn't done after all.
+
+**Clear N done** bins the lot, and it asks first: the quiet link becomes two buttons, **Clear N** and **Keep them**. Nothing goes until you hit the orange one. Walk away and the question puts itself away after five seconds, so a stray click never leaves a live delete button sitting on your screen.
 
 The hub only ever shows what's left to do at full size. The count in the corner is how many that is.
 
