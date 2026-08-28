@@ -33,6 +33,7 @@ One small card sits on top of everything: the round orange **AI** button and you
 |---|---|
 | **Click the AI circle** | Settings open. Click it again and they close |
 | **Type + Enter** | Adds the job to the list |
+| **Click the → on a job** | Sends that job to your AI as its own message |
 | **Click a job** | Ticks it off — it drops to the bottom, struck through |
 | **Click a ticked one** | Puts it back on the list |
 | **Clear N done** | Bins the ticked ones |
@@ -41,6 +42,14 @@ One small card sits on top of everything: the round orange **AI** button and you
 | **Alt + 8** | Settings, without reaching for the mouse |
 
 **There is no close button, and that's deliberate.** No ✕, no Esc, no key to hide it, nothing in the tray to switch it off. Alt+F4 does nothing to it. Show desktop takes every other window off the screen and the hub is still there when the dust settles — a watcher puts it back within a second or two. A list you can put away is a list you ignore, so this one you can't.
+
+### Jobs the AI can do for you
+
+Write the job the way you'd say it out loud: *Draft a reply to Sam about the invoice.* Then click the **→** next to it. That exact line goes to whichever app you've picked in Settings — Claude, ChatGPT, T3, Word, whatever's selected — as its own message, and it sends. You stay in what you were doing.
+
+You clicked an arrow that means send, so it sends. Turning auto-send off changes what your *hotkeys* do, not a button. In a document app like Word, where Enter would only leave a blank line, it drops the text in and leaves the Enter to you.
+
+The job stays on the list afterwards. Tick it off when what came back is good, or hit the arrow again to ask twice.
 
 Still-to-do jobs sit at the top and ticked ones underneath, so the next thing is always the first thing you see. The count in the corner is how many are left.
 
@@ -65,6 +74,7 @@ Under **Filling** in Settings you can change what it presses to move on: **Tab**
 ## What's new
 
 - **The hub.** The round **AI** button and a to-do list, one card on top of everything. Type a job, press Enter, click it when it's done. Click the circle for settings. No close button anywhere on it, on purpose. See [The hub](#the-hub).
+- **Send a job to your AI.** Every job on the list has a **→**. Click it and that line goes to your selected app as a message, and sends. Write the job as the ask and let the AI do it.
 - **Filling mode.** Alt+9 or a switch in Settings, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
 - **It says hello now.** First run gives you a short card with the three keys, instead of a tray icon and no idea what to do with it.
 - **Your settings are yours.** `config.ini` is no longer in the repo — the defaults ship as `config.example.ini` and get copied on first run, so updating never overwrites your apps and keys.

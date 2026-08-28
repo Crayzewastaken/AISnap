@@ -48,6 +48,7 @@ global Todo      := 0     ; the card, and it's meant to be up the whole time
 global TodoItems := []    ; what's on it: [{text, done}]
 global TodoEdit  := 0, TodoHead := 0
 global TodoBmp   := 0     ; the AI circle, drawn once and kept
+global TodoPrev  := 0     ; what you were working in before you clicked the hub
 
 ; Hover highlighting keeps its list here (see the hover section further down).
 ; Same reason again: the to-do card is drawn from the auto-execute section.
@@ -102,6 +103,7 @@ try TraySetIcon(A_ScriptDir "\ai-snap.ico")
 OnMessage(0x201, DragCard)                  ; 0x201 = left mouse button down
 OnMessage(0x203, DragCard)                  ; 0x203 = ...and that was a double
 OnMessage(0x232, TodoMoved)                 ; 0x232 = a drag of the list finished
+OnMessage(0x006, TodoActivated)             ; 0x006 = a window took the focus
 
 ; Enter sends from the composer box (Shift+Enter still makes a new line).
 ; Registered once, and only ever live while that window is the active one.
@@ -1486,18 +1488,18 @@ ShowTodo() {
     ; Both header labels are as tall as the circle and centred inside that
     ; height (+0x200), so the row lines up and whatever comes next clears it.
     g.SetFont("s11 w600 c" t.text)
-    TodoHead := g.Add("Text", "x+10 yp w130 h36 +0x200 +0x100", "To do")
+    TodoHead := g.Add("Text", "x+10 yp w170 h36 +0x200 +0x100", "To do")
     g.SetFont("s9 c" t.dim)
     g.Add("Text", "x+0 yp w84 h36 Right +0x200", left " left")
 
     g.SetFont("s10 c" t.text)
-    TodoEdit := g.Add("Edit", "xm y+10 w260 h30 -E0x200 Background" t.panel
+    TodoEdit := g.Add("Edit", "xm y+10 w300 h30 -E0x200 Background" t.panel
                             . " c" t.text)
     Round(TodoEdit, 8)
 
     if !TodoItems.Length {
         g.SetFont("s9 c" t.dim)
-        g.Add("Text", "xm y+14 w260", "Nothing on the list. Type above, Enter adds it.")
+        g.Add("Text", "xm y+14 w300", "Nothing on the list. Type above, Enter adds it.")
     }
     ; Still to do at the top, ticked ones underneath, so the next job is
     ; always the first thing you see.
@@ -1510,7 +1512,7 @@ ShowTodo() {
 
     if done {
         g.SetFont("s9 norm c" t.dim)
-        c := g.Add("Text", "xm y+12 w260 Center +0x100 +0x80", "Clear " done " done")
+        c := g.Add("Text", "xm y+12 w300 Center +0x100 +0x80", "Clear " done " done")
         c.OnEvent("Click", (*) => TodoClearDone())
     }
 
@@ -1521,21 +1523,30 @@ ShowTodo() {
 
     x := IniRead(cfg, "Look", "TodoX", A_ScreenWidth - 340)
     y := IniRead(cfg, "Look", "TodoY", 140)
-    g.Show("NoActivate AutoSize x" OnScreen(x, 292, true)
+    g.Show("NoActivate AutoSize x" OnScreen(x, 332, true)
                        . " y" OnScreen(y, 220, false))
 }
 
-; One row: the job, and a circle that fills in when it's done. Both halves
-; toggle, because aiming for a 32-pixel target to tick something off is a tax.
+; One row: the job, an arrow that sends it to your app, and a circle that
+; fills in when it's done. The job itself toggles too, because aiming for a
+; 32-pixel target to tick something off is a tax.
 TodoRow(g, t, i, it) {
     ; "norm" first, or the strikethrough on a ticked row sticks to every
-    ; control drawn after it — including the tick itself.
+    ; control drawn after it — including the arrow and the tick.
     g.SetFont("s10 " (it.done ? "strike c" t.dim : "norm c" t.text))
     chip := g.Add("Text", "xm y+8 w220 h30 +0x200 +0x80 +0x4000 Background" t.panel,
                   "  " it.text)
     chip.OnEvent("Click", TodoToggler(i))
     Round(chip, 8)
     Hover(chip, t.panel, t.panelHot)
+
+    g.SetFont("s11 norm c" (it.done ? t.dim : t.accent))
+    send := g.Add("Text", "x+8 yp w32 h30 Center +0x200 +0x80 Background" t.panel,
+                  "→")
+    send.OnEvent("Click", TodoSender(i))
+    Round(send, 8)
+    Hover(send, t.panel, t.panelHot)
+
     g.SetFont("s11 norm c" (it.done ? t.accent : t.dim))
     mark := g.Add("Text", "x+8 yp w32 h30 Center +0x200 +0x80 Background" t.panel,
                   it.done ? "✓" : "○")
@@ -1544,9 +1555,46 @@ TodoRow(g, t, i, it) {
     Hover(mark, t.panel, t.panelHot)
 }
 
-; One toggler per row, for the same reason the composer has one remover per
-; chip: a closure made inside the loop would share the last number.
+; One toggler and one sender per row, for the same reason the composer has one
+; remover per chip: a closure made inside the loop would share the last number.
 TodoToggler(i) => (*) => TodoToggle(i)
+TodoSender(i)  => (*) => TodoSend(i)
+
+; Send one job to your AI — or to whichever app you've picked in Settings —
+; as its own message. Write "Draft a reply to that email" on the list, click
+; the arrow, and it lands over there and goes. You clicked send, so it sends:
+; auto-send being off is about what your HOTKEYS do, and this is a button
+; that says send on it. Enter is still held back for apps where Enter only
+; means a blank line, like Word.
+;
+; The job stays on the list. Tick it off yourself when what came back is good.
+TodoSend(i) {
+    global TodoItems, TodoPrev
+    if (i > TodoItems.Length)
+        return
+    txt := TodoItems[i].text
+    ClipHold()                        ; this copy is ours, not fill mode's
+    try {
+        A_Clipboard := txt
+        ; Wait for it to actually land — a fixed sleep here was a race, and
+        ; losing it meant Ctrl+V arrived at an empty clipboard.
+        if !ClipWait(4) {
+            TrayTip("Nothing sent", "The clipboard never took the job.", 2)
+            return
+        }
+        if !FocusTarget()
+            return
+        if !Paste()                   ; something jumped in front mid-send
+            return
+        Sleep(120)
+        if EnterOK()
+            Send("{Enter}")
+        Log("todo sent — " StrLen(txt) " chars")
+    }
+    finally
+        ClipRelease()
+    GoBack(TodoPrev)
+}
 
 TodoToggle(i) {
     global TodoItems
@@ -1622,6 +1670,18 @@ TodoWatch() {
             || WinGetMinMax("ahk_id " Todo.Hwnd) = -1)
             Todo.Show("NoActivate")
     }
+}
+
+; Clicking the hub makes it the active window, so by the time you press the
+; send arrow, "what you were doing" is already gone. Windows tells us on the
+; way in: when the hub is activated, lParam is the window that just lost the
+; focus. That's where GoBack goes.
+;   0x006 = WM_ACTIVATE, and the low word of wParam is 0 only when we're the
+;   ones losing it.
+TodoActivated(wParam, lParam, msg, hwnd) {
+    global Todo, TodoPrev
+    if (Todo && hwnd = Todo.Hwnd && (wParam & 0xFFFF) && lParam)
+        TodoPrev := lParam
 }
 
 ; A drag of the heading has just finished — remember where you put it.
