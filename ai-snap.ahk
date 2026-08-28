@@ -51,6 +51,17 @@ global BadgeAt    := [0, 0]   ; and where, so a second one has to be near it
 global BadgeFrom  := [0, 0, 0, 0]   ; mouse x,y and window x,y when you pressed
 global BadgeMoved := false
 
+; --- the to-do list (see the to-do section further down) --------------------
+; Up here for the same reason as the button: ShowTodo() runs in the
+; auto-execute section, long before the file reaches where these live.
+global Todo      := 0     ; the card, and it's meant to be up the whole time
+global TodoItems := []    ; what's on it: [{text, done}]
+global TodoEdit  := 0, TodoHead := 0
+
+; Hover highlighting keeps its list here (see the hover section further down).
+; Same reason again: the to-do card is drawn from the auto-execute section.
+global HoverBtns := [], HoverAt := 0
+
 ; --- fill mode (see the fill section further down) --------------------------
 global Filling     := false   ; armed: every copy lands and moves on
 global FillLast    := 0       ; when the last one landed, for the idle timeout
@@ -83,6 +94,7 @@ keyAll  := IniRead(cfg, "Hotkeys", "CopyAllOnPage",  "!4")
 keyPost := IniRead(cfg, "Hotkeys", "Post",           "!0")
 keyFill := IniRead(cfg, "Hotkeys", "Fill",           "!9")
 keyBtn  := IniRead(cfg, "Hotkeys", "Button",         "!8")
+keyTodo := IniRead(cfg, "Hotkeys", "Todo",           "!7")
 
 ; --- bind the hotkeys -------------------------------------------------------
 Hotkey(keyDict, DictateToAI)
@@ -92,16 +104,23 @@ Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
 Hotkey(keyFill, ToggleFill)
 Hotkey(keyBtn,  (*) => ToggleBadge())       ; bring the floating button back
+Hotkey(keyTodo, (*) => TodoFocus())         ; jump into the to-do box
 
 ; The little bot, instead of AutoHotkey's H. Missing icon isn't worth dying over.
 try TraySetIcon(A_ScriptDir "\ai-snap.ico")
 OnMessage(0x201, DragCard)                  ; 0x201 = left mouse button down
 OnMessage(0x203, DragCard)                  ; 0x203 = ...and that was a double
+OnMessage(0x232, TodoMoved)                 ; 0x232 = a drag of the list finished
 
 ; Enter sends from the composer box (Shift+Enter still makes a new line).
 ; Registered once, and only ever live while that window is the active one.
 HotIfWinActive("Send to AI ahk_class AutoHotkeyGUI")
 Hotkey("Enter", ComposerSend)
+HotIf()
+
+; And Enter puts what you typed on the to-do list.
+HotIfWinActive("AI Snap to-do list ahk_class AutoHotkeyGUI")
+Hotkey("Enter", TodoAdd)
 HotIf()
 
 ; Watch for your dictation key being released. The "~" means we only listen —
@@ -145,6 +164,12 @@ if A_IsAdmin
 ; The little round button on screen, unless you've put it away.
 if (IniRead(cfg, "Look", "Button", "1") = "1")
     ShowBadge()
+
+; The to-do list, always. There's no setting to turn it off and no key to
+; hide it — a list you can put away is a list you ignore.
+LoadTodo()
+ShowTodo()
+SetTimer(TodoWatch, 1500)
 
 ; Were we filling when the settings window saved and restarted us? Pick it
 ; back up. The flag is consumed on the way in, so starting AI Snap fresh
@@ -1009,7 +1034,8 @@ ThemeButton(g, t, label, opts, cb, primary := false) {
 ; ---- hover ------------------------------------------------------------------
 ; Static controls have no hover event, so one cheap timer watches what the
 ; mouse is over and recolours only when it moves onto something new.
-global HoverBtns := [], HoverAt := 0
+; Its two globals are declared at the top of the file — the to-do card draws
+; hoverable rows before the script ever reaches this line.
 
 ; NB: don't call that first colour "base" — in an object literal that word sets
 ; the prototype, and you get "Invalid base" instead of a button.
@@ -1075,7 +1101,7 @@ Attach(label, prev, wait) {
 ; There's no title bar to grab, so dragging the heading moves the card.
 ; 0xA1 = "act like the mouse went down on the caption", 2 = the caption.
 DragCard(wParam, lParam, msg, hwnd) {
-    global Comp, CompHead, SetGui, SetHead, Badge
+    global Comp, CompHead, SetGui, SetHead, Badge, Todo, TodoHead
     ; The floating button does its own thing — it has to tell a click from a
     ; drag from a triple-click, which the caption trick below can't.
     if (Badge && hwnd = Badge.Hwnd) {
@@ -1090,7 +1116,9 @@ DragCard(wParam, lParam, msg, hwnd) {
             BadgeDown()
         return 0
     }
-    if (Comp && CompHead && hwnd = CompHead.Hwnd)
+    if (Todo && TodoHead && hwnd = TodoHead.Hwnd)
+        PostMessage(0xA1, 2, 0, , "ahk_id " Todo.Hwnd)
+    else if (Comp && CompHead && hwnd = CompHead.Hwnd)
         PostMessage(0xA1, 2, 0, , "ahk_id " Comp.Hwnd)
     else if (SetGui && SetHead && hwnd = SetHead.Hwnd)
         PostMessage(0xA1, 2, 0, , "ahk_id " SetGui.Hwnd)
@@ -1533,6 +1561,214 @@ BadgeClicked() {
         return
     BadgeWait := false
     SetGui ? CloseSettings() : ShowSettings()  ; open already? then close it
+}
+
+; ============================================================================
+;  the to-do list — a small card that lives on your screen and stays there
+;
+;  Type at the top, press Enter, it's on the list. Click a row to tick it off,
+;  click it again if you ticked it by mistake. Drag the heading to move it.
+;
+;  There is no close button, no Escape, no hide key, and a watcher puts it
+;  back if Windows takes it off screen (Win+D does). That's the whole point:
+;  a list you can't get rid of is a list you finish.
+; ============================================================================
+TodoFile() => A_ScriptDir "\todo.txt"
+
+; Plain text, one job per line, "x " in front of the ones you've done. It's a
+; file you can open in Notepad and edit by hand, and that's deliberate.
+LoadTodo() {
+    global TodoItems
+    TodoItems := []
+    if !FileExist(TodoFile())
+        return
+    try lines := StrSplit(FileRead(TodoFile(), "UTF-8"), "`n", "`r")
+    catch
+        return
+    for line in lines {
+        if (Trim(line) = "")
+            continue
+        done := (SubStr(line, 1, 2) = "x ")
+        TodoItems.Push({ text: done ? SubStr(line, 3) : line, done: done })
+    }
+}
+
+SaveTodo() {
+    global TodoItems
+    out := ""
+    for it in TodoItems
+        out .= (it.done ? "x " : "") it.text "`n"
+    try FileDelete(TodoFile())
+    try FileAppend(out, TodoFile(), "UTF-8")
+}
+
+ShowTodo() {
+    global Todo, TodoItems, TodoEdit, TodoHead, cfg
+    if Todo
+        return
+    t := ThemeNow()
+    Todo := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap to-do list")
+    g.MarginX := 16, g.MarginY := 14
+    ApplyTheme(g, t)
+
+    left := 0, done := 0
+    for it in TodoItems {
+        if it.done
+            done++
+        else
+            left++
+    }
+
+    g.SetFont("s11 w600 c" t.text)
+    TodoHead := g.Add("Text", "xm ym w180 +0x100", "To do")   ; 0x100 = clickable
+    g.SetFont("s9 c" t.dim)
+    g.Add("Text", "x+0 yp+4 w80 Right", left " left")
+
+    g.SetFont("s10 c" t.text)
+    TodoEdit := g.Add("Edit", "xm y+10 w260 h30 -E0x200 Background" t.panel
+                            . " c" t.text)
+    Round(TodoEdit, 8)
+
+    if !TodoItems.Length {
+        g.SetFont("s9 c" t.dim)
+        g.Add("Text", "xm y+14 w260", "Nothing on the list. Type above, Enter adds it.")
+    }
+    ; Still to do at the top, ticked ones underneath, so the next job is
+    ; always the first thing you see.
+    for i, it in TodoItems
+        if !it.done
+            TodoRow(g, t, i, it)
+    for i, it in TodoItems
+        if it.done
+            TodoRow(g, t, i, it)
+
+    if done {
+        g.SetFont("s9 norm c" t.dim)
+        c := g.Add("Text", "xm y+12 w260 Center +0x100 +0x80", "Clear " done " done")
+        c.OnEvent("Click", (*) => TodoClearDone())
+    }
+
+    ; The two ways Windows offers to make a window go away, both refused.
+    ; Returning true from these callbacks is what stops the default hide.
+    g.OnEvent("Escape", (*) => true)
+    g.OnEvent("Close",  (*) => true)
+
+    x := IniRead(cfg, "Look", "TodoX", A_ScreenWidth - 340)
+    y := IniRead(cfg, "Look", "TodoY", 140)
+    g.Show("NoActivate AutoSize x" OnScreen(x, 292, A_ScreenWidth)
+                       . " y" OnScreen(y, 220, A_ScreenHeight))
+}
+
+; One row: the job, and a circle that fills in when it's done. Both halves
+; toggle, because aiming for a 32-pixel target to tick something off is a tax.
+TodoRow(g, t, i, it) {
+    ; "norm" first, or the strikethrough on a ticked row sticks to every
+    ; control drawn after it — including the tick itself.
+    g.SetFont("s10 " (it.done ? "strike c" t.dim : "norm c" t.text))
+    chip := g.Add("Text", "xm y+8 w220 h30 +0x200 +0x80 +0x4000 Background" t.panel,
+                  "  " it.text)
+    chip.OnEvent("Click", TodoToggler(i))
+    Round(chip, 8)
+    Hover(chip, t.panel, t.panelHot)
+    g.SetFont("s11 norm c" (it.done ? t.accent : t.dim))
+    mark := g.Add("Text", "x+8 yp w32 h30 Center +0x200 +0x80 Background" t.panel,
+                  it.done ? "✓" : "○")
+    mark.OnEvent("Click", TodoToggler(i))
+    Round(mark, 8)
+    Hover(mark, t.panel, t.panelHot)
+}
+
+; One toggler per row, for the same reason the composer has one remover per
+; chip: a closure made inside the loop would share the last number.
+TodoToggler(i) => (*) => TodoToggle(i)
+
+TodoToggle(i) {
+    global TodoItems
+    if (i > TodoItems.Length)
+        return
+    TodoItems[i].done := !TodoItems[i].done
+    SaveTodo()
+    RebuildTodo()
+}
+
+; The list changing changes how tall the card is, so build it again — same
+; approach as the composer, and for the same reason.
+RebuildTodo(focus := false) {
+    global Todo, TodoEdit
+    if Todo {
+        try Todo.Destroy()
+        Todo := 0
+    }
+    ShowTodo()
+    if focus {
+        WinActivate("ahk_id " Todo.Hwnd)
+        TodoEdit.Focus()
+    }
+}
+
+TodoAdd(*) {
+    global TodoItems, TodoEdit
+    if !TodoEdit
+        return
+    ; The keyboard hook hands us Enter before the box has drawn the last few
+    ; letters you typed. Reading it right now clips them off the end, so give
+    ; the window its moment to catch up first.
+    Sleep(30)
+    txt := Trim(TodoEdit.Value)
+    if (txt = "")
+        return
+    TodoItems.Push({ text: txt, done: false })
+    TodoEdit.Value := ""
+    SaveTodo()
+    Log("todo added — " TodoItems.Length " on the list")
+    RebuildTodo(true)             ; still typing, so stay in the box
+}
+
+TodoClearDone() {
+    global TodoItems
+    kept := []
+    for it in TodoItems
+        if !it.done
+            kept.Push(it)
+    TodoItems := kept
+    SaveTodo()
+    RebuildTodo()
+}
+
+; Jump to the box from anywhere, without reaching for the mouse.
+TodoFocus() {
+    global Todo, TodoEdit
+    ShowTodo()
+    WinActivate("ahk_id " Todo.Hwnd)
+    TodoEdit.Focus()
+}
+
+; The watcher. Show desktop, a minimise-everything key, anything else that
+; sweeps the screen — the list comes straight back.
+TodoWatch() {
+    global Todo
+    if !Todo {
+        ShowTodo()
+        return
+    }
+    try {
+        if (!DllCall("IsWindowVisible", "ptr", Todo.Hwnd)
+            || WinGetMinMax("ahk_id " Todo.Hwnd) = -1)
+            Todo.Show("NoActivate")
+    }
+}
+
+; A drag of the heading has just finished — remember where you put it.
+; 0x232 = WM_EXITSIZEMOVE.
+TodoMoved(wParam, lParam, msg, hwnd) {
+    global Todo, cfg
+    if (!Todo || hwnd != Todo.Hwnd)
+        return
+    try {
+        WinGetPos(&x, &y, , , "ahk_id " Todo.Hwnd)
+        IniWrite(x, cfg, "Look", "TodoX")
+        IniWrite(y, cfg, "Look", "TodoY")
+    }
 }
 
 ; ============================================================================

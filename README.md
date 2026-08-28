@@ -9,6 +9,7 @@ Talk to your AI, snip a piece of your screen, or send the text you've highlighte
 - **Alt + 3** → sends the text you have **highlighted**.
 - **Alt + 4** → **selects everything** on the page and sends it.
 - **Alt + 0** → send by hand (only needed if you turn auto-send off).
+- **Alt + 7** → jump into your [to-do list](#the-to-do-list) and type the next job.
 
 **Say something about it first.** When you snip or copy, a small **Send to AI** box pops up. Type whatever you want to say, grab more bits while you're at it — another screenshot, more highlighted text — and it all goes across in **one message** when you hit Enter. See [The composer box](#the-composer-box).
 
@@ -43,6 +44,27 @@ It never takes focus, so clicking it doesn't interrupt whatever you were typing 
 
 ---
 
+## The to-do list
+
+A small card sits on your screen with everything you still have to do on it. Type in the box, press **Enter**, it's on the list. Click a job to tick it off. Click it again if you ticked the wrong one.
+
+| Do this | What happens |
+|---|---|
+| **Type + Enter** | Adds it to the list |
+| **Click a job** | Ticks it off — it drops to the bottom, struck through |
+| **Click a ticked one** | Puts it back on the list |
+| **Clear N done** | Bins the ticked ones |
+| **Drag the heading** | Moves the card, and it stays there next time |
+| **Alt + 7** | Puts the cursor in the box from wherever you are |
+
+**There is no close button, and that's deliberate.** No ✕, no Esc, no key to hide it, nothing in the tray to switch it off. Alt+F4 does nothing to it. Show desktop takes every other window off the screen and the list is still there when the dust settles — a watcher puts it back within a second or two. A list you can put away is a list you ignore, so this one you can't.
+
+Still-to-do jobs sit at the top and ticked ones underneath, so the next thing is always the first thing you see. The count in the corner is how many are left.
+
+Your jobs live in **`todo.txt`** next to the script — one per line, `x ` in front of the done ones. It's a plain text file you can open in Notepad and edit by hand, and it's read back the moment AI Snap starts, so a restart, a reboot or a crash never loses your list.
+
+---
+
 ## Filling: copy, copy, copy
 
 **Alt + 9** turns on filling — or the switch on the **Filling** page in Settings, whichever you'd rather. After that, every single thing you copy lands in your chosen app and then it presses **Tab** to move to the next cell. It stays on until you turn it off.
@@ -57,6 +79,7 @@ Under **Filling** in Settings you can change what it presses to move on: **Tab**
 
 ## What's new
 
+- **A to-do list that won't go away.** Type a job, press Enter, click it when it's done. No close button anywhere on it, on purpose. See [The to-do list](#the-to-do-list).
 - **A floating button.** A small round **AI** on top of everything — click for settings, click again to close, drag it anywhere, double-click to dismiss. See [The floating button](#the-floating-button).
 - **Filling mode.** Alt+9 or a switch in Settings, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
 - **It says hello now.** First run gives you a short card with the three keys, instead of a tray icon and no idea what to do with it.
@@ -292,7 +315,7 @@ That returns nothing. There is nowhere for your data to go.
 | Sends keystrokes to another window | Pasting into your AI *is* Ctrl+V in that window |
 | Reads window titles and process names | To find the app you asked it to send to |
 | Triggers Windows' own screen snip | That's the screenshot key |
-| Writes two files, next to the script | `config.ini` (your settings) and `ai-snap.log` (off by default) |
+| Writes three files, next to the script | `config.ini` (your settings), `todo.txt` (your to-do list) and `ai-snap.log` (off by default) |
 
 **What it deliberately doesn't do:** it never writes what you copied to disk. With `Debug = 1` the log records that something was attached and how big it was — `attached: Text (312 bytes)` — never the text itself. Logs get pasted into bug reports.
 

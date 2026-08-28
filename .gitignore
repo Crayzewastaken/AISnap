@@ -2,6 +2,9 @@
 # copied to config.ini on first run, and that copy is yours to keep.
 config.ini
 
+# Your to-do list. Yours, not the repo's.
+todo.txt
+
 # Compiled output
 *.exe
 
