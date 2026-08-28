@@ -1435,15 +1435,22 @@ ToggleSettings() {
 }
 
 ; Put a card on screen without anyone watching it being built. A window shown
-; where you can see it paints its background first and its controls after,
-; and that half-painted moment is the blink you get on every rebuild. So it
-; goes up off the side of the desktop, paints there, and arrives finished.
-;   0x15 = keep the size it already has, don't reorder it, don't activate it
+; where you can see it paints its background first and each control after —
+; and the card is clipped around its children, so until those arrive you see
+; straight through the holes where they're going to be. That's the blink.
+;
+; So it goes up completely transparent, which still paints it, everything on
+; it is told to paint right now, and then it turns solid in one step.
+;   E0x80000 = WS_EX_LAYERED       2 = LWA_ALPHA
+;   0x181 = RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN
 ShowPainted(g, x, y, size) {
-    g.Show("NoActivate x-32000 y-32000 " size)
-    DllCall("UpdateWindow", "ptr", g.Hwnd)
-    DllCall("SetWindowPos", "ptr", g.Hwnd, "ptr", 0, "int", x, "int", y,
-            "int", 0, "int", 0, "uint", 0x15)
+    g.Opt("+E0x80000")
+    DllCall("SetLayeredWindowAttributes", "ptr", g.Hwnd, "uint", 0,
+            "uchar", 0, "uint", 2)
+    g.Show("NoActivate x" x " y" y " " size)
+    DllCall("RedrawWindow", "ptr", g.Hwnd, "ptr", 0, "ptr", 0, "uint", 0x181)
+    DllCall("SetLayeredWindowAttributes", "ptr", g.Hwnd, "uint", 0,
+            "uchar", 255, "uint", 2)
 }
 
 ; A saved position is only as good as the monitors it was saved on — unplug a
