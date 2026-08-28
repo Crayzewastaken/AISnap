@@ -1467,6 +1467,12 @@ ShowTodo() {
     t := ThemeNow()
     Todo := g := Gui("-Caption +AlwaysOnTop +ToolWindow", "AI Snap to-do list")
     g.MarginX := 16, g.MarginY := 14
+    ; Windows fades a new window in on the way up. The card is built again
+    ; every time you tick a job or fold the drawer, and a fade on every one of
+    ; those is the flicker — the card is meant to change, not reappear.
+    ;   3 = DWMWA_TRANSITIONS_FORCEDISABLED
+    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 3,
+                "int*", 1, "int", 4)
     ApplyTheme(g, t)
 
     left := 0, done := 0
@@ -1620,16 +1626,25 @@ TodoToggle(i) {
 
 ; The list changing changes how tall the card is, so build it again — same
 ; approach as the composer, and for the same reason.
+;
+; The new card goes up BEFORE the old one comes down. Destroying first left a
+; gap with no window in it, and a gap on screen for even one frame is the
+; flash you see every time you tick something or fold the drawer. Both cards
+; sit at the same spot with the same content, so the swap underneath is
+; invisible.
 RebuildTodo(focus := false) {
     global Todo, TodoEdit
-    if Todo {
-        try Todo.Destroy()
-        Todo := 0
-    }
+    old := Todo
+    ; Interacting with the hub means the hub had the focus. Hand it back to
+    ; the new card, or destroying the old one throws you into another app.
+    wasActive := old && (WinActive("A") = old.Hwnd)
+    Todo := 0                      ; so ShowTodo builds instead of bailing out
     ShowTodo()
-    if focus {
+    if old
+        try old.Destroy()
+    if (focus || wasActive) {
         WinActivate("ahk_id " Todo.Hwnd)
-        TodoEdit.Focus()
+        TodoEdit.Focus()           ; and leave the caret where you type
     }
 }
 
