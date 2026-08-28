@@ -1434,6 +1434,18 @@ ToggleSettings() {
     SetGui ? CloseSettings() : ShowSettings()
 }
 
+; Put a card on screen without anyone watching it being built. A window shown
+; where you can see it paints its background first and its controls after,
+; and that half-painted moment is the blink you get on every rebuild. So it
+; goes up off the side of the desktop, paints there, and arrives finished.
+;   0x15 = keep the size it already has, don't reorder it, don't activate it
+ShowPainted(g, x, y, size) {
+    g.Show("NoActivate x-32000 y-32000 " size)
+    DllCall("UpdateWindow", "ptr", g.Hwnd)
+    DllCall("SetWindowPos", "ptr", g.Hwnd, "ptr", 0, "int", x, "int", y,
+            "int", 0, "int", 0, "uint", 0x15)
+}
+
 ; A saved position is only as good as the monitors it was saved on — unplug a
 ; screen and it would sit somewhere you can't reach or click. Clamp against
 ; the whole desktop rather than the primary screen: a monitor to the LEFT of
@@ -1618,8 +1630,7 @@ ShowTodo() {
 
     x := IniRead(cfg, "Look", "TodoX", A_ScreenWidth - 340)
     y := IniRead(cfg, "Look", "TodoY", 140)
-    g.Show("NoActivate AutoSize x" OnScreen(x, 332, true)
-                       . " y" OnScreen(y, 220, false))
+    ShowPainted(g, OnScreen(x, 332, true), OnScreen(y, 220, false), "AutoSize")
 }
 
 ; One row: the job, an arrow that sends it to your app, and a circle that
@@ -2146,10 +2157,15 @@ ShowSettings(*) {
 
     g.OnEvent("Escape", (*) => CloseSettings())
     g.OnEvent("Close",  (*) => CloseSettings())
-    g.Show((ox = "" ? "" : "x" ox " y" oy " ") "w" (CX + CW + 26) " h" WH)
+    WW := CX + CW + 26
+    ; Where the old card was, or the middle of the screen the first time.
+    sx := (ox = "" ? (A_ScreenWidth - WW) // 2 : ox)
+    sy := (oy = "" ? (A_ScreenHeight - WH) // 2 : oy)
+    ShowPainted(g, sx, sy, "w" WW " h" WH)
     if old {
         try old.Destroy()                 ; the new one is already covering it
     }
+    WinActivate("ahk_id " g.Hwnd)         ; ShowPainted deliberately doesn't
     ; Just added one? Land in its name box with the text selected, so a page
     ; title that came out too long can be typed over straight away.
     if (SetFresh && SetCtl.Has("rename")) {
