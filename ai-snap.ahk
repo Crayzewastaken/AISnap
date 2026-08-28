@@ -39,24 +39,15 @@ global CompEdit  := 0, CompHead := 0
 global DictationKey  := IniRead(cfg, "Dictation", "Key",  "F4")
 global DictationWait := IniRead(cfg, "Dictation", "Wait", "2500")
 
-; --- the floating button (see the badge section further down) ---------------
+; --- the hub (see the hub section further down) -----------------------------
 ; Declared up here, not next to its own code: the auto-execute section calls
-; ShowBadge() before it ever reaches that part of the file, and reading a
+; ShowTodo() before it ever reaches that part of the file, and reading a
 ; global that hasn't been assigned yet stops the whole script dead on an
 ; error box you can't see behind everything else.
-global Badge      := 0        ; the window, 0 when it isn't up
-global BadgeWait  := false    ; a click has landed, waiting to see if a second one does
-global BadgeLast  := 0        ; when that click was
-global BadgeAt    := [0, 0]   ; and where, so a second one has to be near it
-global BadgeFrom  := [0, 0, 0, 0]   ; mouse x,y and window x,y when you pressed
-global BadgeMoved := false
-
-; --- the to-do list (see the to-do section further down) --------------------
-; Up here for the same reason as the button: ShowTodo() runs in the
-; auto-execute section, long before the file reaches where these live.
 global Todo      := 0     ; the card, and it's meant to be up the whole time
 global TodoItems := []    ; what's on it: [{text, done}]
 global TodoEdit  := 0, TodoHead := 0
+global TodoBmp   := 0     ; the AI circle, drawn once and kept
 
 ; Hover highlighting keeps its list here (see the hover section further down).
 ; Same reason again: the to-do card is drawn from the auto-execute section.
@@ -103,7 +94,7 @@ Hotkey(keySel,  CopySelectionToAI)
 Hotkey(keyAll,  CopyAllToAI)
 Hotkey(keyPost, PostToAI)
 Hotkey(keyFill, ToggleFill)
-Hotkey(keyBtn,  (*) => ToggleBadge())       ; bring the floating button back
+Hotkey(keyBtn,  (*) => ToggleSettings())    ; settings, without the mouse
 Hotkey(keyTodo, (*) => TodoFocus())         ; jump into the to-do box
 
 ; The little bot, instead of AutoHotkey's H. Missing icon isn't worth dying over.
@@ -146,7 +137,6 @@ TrayClick(wParam, lParam, *) {
     }
 }
 A_TrayMenu.Add()
-A_TrayMenu.Add("Show the floating button", (*) => ToggleBadge())
 A_TrayMenu.Add("Get Handy (voice dictation)…", (*) => InstallHandy())
 A_TrayMenu.Add("Edit config.ini directly", (*) => Run(cfg))
 A_TrayMenu.Add("Reload", (*) => Reload())
@@ -161,12 +151,9 @@ if A_IsAdmin
             "AI Snap doesn't need it, and it can reach admin windows this way."
           . " Start it normally instead.", 2)
 
-; The little round button on screen, unless you've put it away.
-if (IniRead(cfg, "Look", "Button", "1") = "1")
-    ShowBadge()
-
-; The to-do list, always. There's no setting to turn it off and no key to
-; hide it — a list you can put away is a list you ignore.
+; The hub: the AI circle and your to-do list, one card, always on screen.
+; There's no setting to turn it off and no key to hide it — a list you can
+; put away is a list you ignore.
 LoadTodo()
 ShowTodo()
 SetTimer(TodoWatch, 1500)
@@ -1101,21 +1088,7 @@ Attach(label, prev, wait) {
 ; There's no title bar to grab, so dragging the heading moves the card.
 ; 0xA1 = "act like the mouse went down on the caption", 2 = the caption.
 DragCard(wParam, lParam, msg, hwnd) {
-    global Comp, CompHead, SetGui, SetHead, Badge, Todo, TodoHead
-    ; The floating button does its own thing — it has to tell a click from a
-    ; drag from a triple-click, which the caption trick below can't.
-    if (Badge && hwnd = Badge.Hwnd) {
-        ; Windows sends the SECOND click of a double as its own message, once
-        ; it has decided the two were close enough in time and place. That's
-        ; the real double-click detector, and it means the second click never
-        ; arrives as an ordinary one — which is why counting them alone
-        ; silently never saw a double at all.
-        if (msg = 0x203)                       ; WM_LBUTTONDBLCLK
-            BadgeDoubled()
-        else
-            BadgeDown()
-        return 0
-    }
+    global Comp, CompHead, SetGui, SetHead, Todo, TodoHead
     if (Todo && TodoHead && hwnd = TodoHead.Hwnd)
         PostMessage(0xA1, 2, 0, , "ahk_id " Todo.Hwnd)
     else if (Comp && CompHead && hwnd = CompHead.Hwnd)
@@ -1323,43 +1296,18 @@ Preview(t) {
 }
 
 ; ============================================================================
-;  the floating button — a small round thing that sits on top of everything
+;  the AI circle — drawn once, and it lives on the hub card
 ;
-;  Click it to open settings, click it again to put them away. Drag it
-;  wherever you want it and it stays there. Double-click gets rid of it, and
-;  the tray menu brings it back.
-;
-;  Click and drag start the same way, so we can't know which one it was until
-;  the button comes back up: moved = you were dragging, didn't = you clicked.
+;  The old floating button was its own round window. It's a picture on the
+;  card now: one thing on screen instead of two, and dragging the card takes
+;  the circle with it. Click it for settings, same as it ever did.
 ; ============================================================================
-ShowBadge() {
-    global Badge, cfg
-    if Badge
-        return
-    t := ThemeNow()
-    ; E0x8000000 = never takes focus. E0x80000 = layered, and that one is what
-    ; makes the circle a circle: clipping a window to a round region keeps or
-    ; drops whole pixels, so the rim comes out as visible stair-steps. A
-    ; layered window is painted from a bitmap that carries its own alpha, so
-    ; the edge can fade instead of jumping.
-    Badge := g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x8000000 +E0x80000",
-                      "AI Snap button")
-    g.MarginX := 0, g.MarginY := 0
-    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 2,
-                "int*", 1, "int", 4)       ; no square shadow behind it
-    ; Where you last left it, or out of the way at the bottom right.
-    x := IniRead(cfg, "Look", "BadgeX", A_ScreenWidth - 96)
-    y := IniRead(cfg, "Look", "BadgeY", A_ScreenHeight - 152)
-    g.Show("NoActivate x" OnScreen(x, 48, A_ScreenWidth)
-                  . " y" OnScreen(y, 48, A_ScreenHeight) " w48 h48")
-    PaintCircle(g.Hwnd, 48, "0xFF" t.accent, "0xFF" t.accentText, "AI", t.font)
-}
 
-; Draw an anti-aliased filled circle with a label into an ARGB bitmap and hand
-; that to the window. Every pixel carries its own transparency, so the rim
-; fades rather than steps — and the corners outside the circle are completely
-; clear, which also means clicks out there fall through to whatever is behind.
-PaintCircle(hwnd, size, fill, ink, label, font) {
+; Draw an anti-aliased filled circle with a label and hand back the bitmap.
+; A control can't blend per-pixel alpha, so the circle is painted onto the
+; card's own background colour instead — same flat colour behind it either
+; way, so the rim still fades rather than stepping.
+CircleBitmap(size, fill, ink, label, font, backdrop) {
     static token := 0
     if !token {
         si := Buffer(24, 0)
@@ -1379,6 +1327,7 @@ PaintCircle(hwnd, size, fill, ink, label, font) {
     DllCall("gdiplus\GdipCreateFromHDC", "ptr", dc, "ptr*", &gfx := 0)
     DllCall("gdiplus\GdipSetSmoothingMode", "ptr", gfx, "int", 4)     ; antialias
     DllCall("gdiplus\GdipSetTextRenderingHint", "ptr", gfx, "int", 4)
+    DllCall("gdiplus\GdipGraphicsClear", "ptr", gfx, "uint", Integer(backdrop))
     DllCall("gdiplus\GdipCreateSolidFill", "uint", Integer(fill), "ptr*", &brush := 0)
     ; inset half a pixel so the edge sits inside the bitmap and has room to fade
     DllCall("gdiplus\GdipFillEllipse", "ptr", gfx, "ptr", brush,
@@ -1404,37 +1353,31 @@ PaintCircle(hwnd, size, fill, ink, label, font) {
         DllCall("gdiplus\GdipDeleteFontFamily", "ptr", fam)
     }
 
-    sz := Buffer(8, 0)
-    NumPut("int", size, sz, 0), NumPut("int", size, sz, 4)
-    blend := Buffer(4, 0)
-    NumPut("uchar", 255, blend, 2), NumPut("uchar", 1, blend, 3)   ; AC_SRC_ALPHA
-    ; a null destination point leaves the window where it is; 2 = ULW_ALPHA
-    DllCall("UpdateLayeredWindow", "ptr", hwnd, "ptr", 0, "ptr", 0, "ptr", sz,
-            "ptr", dc, "ptr", Buffer(8, 0), "uint", 0, "ptr", blend, "uint", 2)
-
     DllCall("gdiplus\GdipDeleteBrush", "ptr", brush)
     DllCall("gdiplus\GdipDeleteGraphics", "ptr", gfx)
-    DllCall("SelectObject", "ptr", dc, "ptr", old)
-    DllCall("DeleteObject", "ptr", bmp)
-    DllCall("DeleteDC", "ptr", dc)
+    DllCall("SelectObject", "ptr", dc, "ptr", old)     ; let go of it, don't
+    DllCall("DeleteDC", "ptr", dc)                     ; delete it — it's the picture
+    return bmp
 }
 
-; A saved position is only as good as the monitor it was saved on — unplug a
-; screen and it would sit somewhere you can't reach or click.
-OnScreen(v, size, limit) => !IsInteger(v) ? 0 : Min(limit - size, Max(0, v + 0))
+; Settings open, settings shut. The circle and the key both land here.
+ToggleSettings() {
+    global SetGui
+    SetGui ? CloseSettings() : ShowSettings()
+}
 
-HideBadge(remember := false) {
-    global Badge, BadgeWait, cfg
-    BadgeWait := false
-    SetTimer(BadgeClicked, 0)
-    if Badge {
-        try Badge.Destroy()
-        Badge := 0
-    }
-    if remember {
-        IniWrite("0", cfg, "Look", "Button")
-        TrayTip("Button put away", "Tray icon → Show the floating button.", 1)
-    }
+; A saved position is only as good as the monitors it was saved on — unplug a
+; screen and it would sit somewhere you can't reach or click. Clamp against
+; the whole desktop rather than the primary screen: a monitor to the LEFT of
+; your main one lives at negative coordinates, and clamping those to zero
+; drags the hub back across to the wrong screen every time you start.
+;   76, 77 = SM_XVIRTUALSCREEN / Y      78, 79 = SM_CXVIRTUALSCREEN / CY
+OnScreen(v, size, horiz) {
+    lo   := DllCall("GetSystemMetrics", "int", horiz ? 76 : 77)
+    span := DllCall("GetSystemMetrics", "int", horiz ? 78 : 79)
+    if !IsInteger(v)
+        return lo
+    return Min(lo + span - size, Max(lo, v + 0))
 }
 
 ; ---- starting with Windows --------------------------------------------------
@@ -1464,110 +1407,12 @@ StartWithWindows(on) {
     }
 }
 
-ToggleBadge() {
-    global Badge, cfg
-    if Badge
-        HideBadge(true)
-    else {
-        IniWrite("1", cfg, "Look", "Button")
-        ShowBadge()
-    }
-}
-
-; --- press, move, release ----------------------------------------------------
-BadgeDown() {
-    global BadgeFrom, BadgeMoved, Badge
-    CoordMode("Mouse", "Screen")
-    MouseGetPos(&mx, &my)
-    WinGetPos(&wx, &wy, , , "ahk_id " Badge.Hwnd)
-    BadgeFrom := [mx, my, wx, wy]
-    BadgeMoved := false
-    SetTimer(BadgeDrag, 15)
-}
-
-BadgeDrag() {
-    global BadgeFrom, BadgeMoved, Badge
-    if !GetKeyState("LButton", "P") {          ; you let go
-        SetTimer(BadgeDrag, 0)
-        BadgeUp()
-        return
-    }
-    if !Badge {
-        SetTimer(BadgeDrag, 0)
-        return
-    }
-    CoordMode("Mouse", "Screen")
-    MouseGetPos(&mx, &my)
-    ; A few pixels of wobble while clicking isn't a drag.
-    if (!BadgeMoved && Abs(mx - BadgeFrom[1]) + Abs(my - BadgeFrom[2]) < 6)
-        return
-    BadgeMoved := true
-    Badge.Move(BadgeFrom[3] + mx - BadgeFrom[1], BadgeFrom[4] + my - BadgeFrom[2])
-}
-
-; What counts as a double-click is a thing Windows already knows, because the
-; user set it in Mouse settings: how long you get between the two, and how far
-; the pointer may drift. Ask it rather than inventing numbers — someone who
-; set a slow double-click gets their slow double-click.
-;   36 = SM_CXDOUBLECLK, 37 = SM_CYDOUBLECLK
-DoubleTime()  => DllCall("GetDoubleClickTime", "uint")
-DoubleSlop(i) => DllCall("GetSystemMetrics", "int", i)
-
-; Two clicks are a double-click only if they were BOTH quick enough and close
-; enough together. That second half is what stops one fast click, or two
-; separate clicks either side of the button, being read as a double.
-IsDoubleClick(gap, dx, dy) =>
-    gap <= DoubleTime() && dx <= DoubleSlop(36) && dy <= DoubleSlop(37)
-
-BadgeUp() {
-    global Badge, BadgeMoved, BadgeWait, BadgeLast, BadgeAt, cfg
-    if BadgeMoved {                            ; you were moving it — remember where
-        BadgeWait := false
-        SetTimer(BadgeClicked, 0)
-        try {
-            WinGetPos(&x, &y, , , "ahk_id " Badge.Hwnd)
-            IniWrite(x, cfg, "Look", "BadgeX")
-            IniWrite(y, cfg, "Look", "BadgeY")
-        }
-        return
-    }
-    CoordMode("Mouse", "Screen")
-    MouseGetPos(&mx, &my)
-    if (BadgeWait && IsDoubleClick(A_TickCount - BadgeLast,
-                                   Abs(mx - BadgeAt[1]), Abs(my - BadgeAt[2]))) {
-        BadgeWait := false
-        SetTimer(BadgeClicked, 0)              ; the single click never happens
-        HideBadge(true)                        ; that was a double — off it goes
-        return
-    }
-    ; Might be the first of two. Hold the single-click action until the window
-    ; for a second one has passed, so a double never opens settings on the way.
-    BadgeWait := true, BadgeLast := A_TickCount, BadgeAt := [mx, my]
-    SetTimer(BadgeClicked, -(DoubleTime() + 40))
-}
-
-; Windows has already applied the user's own double-click speed and slop, so
-; there's nothing left to check — call off the pending single click and go.
-BadgeDoubled() {
-    global BadgeWait
-    BadgeWait := false
-    SetTimer(BadgeClicked, 0)
-    HideBadge(true)
-}
-
-BadgeClicked() {
-    global BadgeWait, SetGui
-    if !BadgeWait                              ; a double already claimed it
-        return
-    BadgeWait := false
-    SetGui ? CloseSettings() : ShowSettings()  ; open already? then close it
-}
-
 ; ============================================================================
-;  the to-do list — a small card that lives on your screen and stays there
+;  the hub — the AI circle and your to-do list, one card, always on screen
 ;
-;  Type at the top, press Enter, it's on the list. Click a row to tick it off,
-;  click it again if you ticked it by mistake. Drag the heading to move it.
+;  The circle opens settings. Type at the top, press Enter, it's on the list.
+;  Click a row to tick it off, click it again if you ticked it by mistake.
+;  Drag the heading and the whole hub moves, circle and all.
 ;
 ;  There is no close button, no Escape, no hide key, and a watcher puts it
 ;  back if Windows takes it off screen (Win+D does). That's the whole point:
@@ -1582,9 +1427,18 @@ LoadTodo() {
     TodoItems := []
     if !FileExist(TodoFile())
         return
+    ; One retry, then say so in the log. Coming back empty from a file that
+    ; isn't empty is how a whole list gets quietly overwritten by the next
+    ; thing you tick.
     try lines := StrSplit(FileRead(TodoFile(), "UTF-8"), "`n", "`r")
-    catch
-        return
+    catch {
+        Sleep(120)
+        try lines := StrSplit(FileRead(TodoFile(), "UTF-8"), "`n", "`r")
+        catch as e {
+            Log("todo could not be read: " e.Message)
+            return
+        }
+    }
     for line in lines {
         if (Trim(line) = "")
             continue
@@ -1600,10 +1454,11 @@ SaveTodo() {
         out .= (it.done ? "x " : "") it.text "`n"
     try FileDelete(TodoFile())
     try FileAppend(out, TodoFile(), "UTF-8")
+    Log("todo saved — " TodoItems.Length " on the list")
 }
 
 ShowTodo() {
-    global Todo, TodoItems, TodoEdit, TodoHead, cfg
+    global Todo, TodoItems, TodoEdit, TodoHead, TodoBmp, cfg
     if Todo
         return
     t := ThemeNow()
@@ -1619,10 +1474,21 @@ ShowTodo() {
             left++
     }
 
+    ; The AI circle. Drawn once and kept: the card is rebuilt every time you
+    ; add or tick something, and redrawing it forty times a day for a picture
+    ; that never changes is work nobody asked for.
+    if !TodoBmp
+        TodoBmp := CircleBitmap(36, "0xFF" t.accent, "0xFF" t.accentText, "AI",
+                                t.font, "0xFF" t.bg)
+    circle := g.Add("Picture", "xm ym w36 h36 +0x100", "HBITMAP:*" TodoBmp)
+    circle.OnEvent("Click", (*) => ToggleSettings())
+
+    ; Both header labels are as tall as the circle and centred inside that
+    ; height (+0x200), so the row lines up and whatever comes next clears it.
     g.SetFont("s11 w600 c" t.text)
-    TodoHead := g.Add("Text", "xm ym w180 +0x100", "To do")   ; 0x100 = clickable
+    TodoHead := g.Add("Text", "x+10 yp w130 h36 +0x200 +0x100", "To do")
     g.SetFont("s9 c" t.dim)
-    g.Add("Text", "x+0 yp+4 w80 Right", left " left")
+    g.Add("Text", "x+0 yp w84 h36 Right +0x200", left " left")
 
     g.SetFont("s10 c" t.text)
     TodoEdit := g.Add("Edit", "xm y+10 w260 h30 -E0x200 Background" t.panel
@@ -1655,8 +1521,8 @@ ShowTodo() {
 
     x := IniRead(cfg, "Look", "TodoX", A_ScreenWidth - 340)
     y := IniRead(cfg, "Look", "TodoY", 140)
-    g.Show("NoActivate AutoSize x" OnScreen(x, 292, A_ScreenWidth)
-                       . " y" OnScreen(y, 220, A_ScreenHeight))
+    g.Show("NoActivate AutoSize x" OnScreen(x, 292, true)
+                       . " y" OnScreen(y, 220, false))
 }
 
 ; One row: the job, and a circle that fills in when it's done. Both halves
@@ -1863,6 +1729,7 @@ SettingsState() {
     SetPend["post"]    := IniRead(cfg, "Hotkeys",   "Post",          "!0")
     SetPend["fill"]        := IniRead(cfg, "Hotkeys",   "Fill",          "!9")
     SetPend["button"]      := IniRead(cfg, "Hotkeys",   "Button",        "!8")
+    SetPend["todo"]        := IniRead(cfg, "Hotkeys",   "Todo",          "!7")
     SetPend["dictkey"]     := IniRead(cfg, "Dictation", "Key",           "F4")
     SetPend["comp"]        := IniRead(cfg, "Behavior",  "Composer",      "1")
     SetPend["auto"]        := IniRead(cfg, "Behavior",  "AutoSend",      "1")
@@ -2124,14 +1991,15 @@ ShowSettings(*) {
 
     PageKeys() {
         Note("Click a key to change it. Hold Ctrl, Alt, Shift or Win with it.")
-        Card(7)
+        Card(8)
         KeyRow("Talk to my AI",         "dict")
         KeyRow("Snip a screenshot",     "snip")
         KeyRow("Send my highlight",     "sel")
         KeyRow("Select all and send",   "all")
         KeyRow("Send by hand",          "post")
         KeyRow("Start filling",         "fill")
-        KeyRow("Show the round button", "button")
+        KeyRow("Jump to my to-do list", "todo")
+        KeyRow("Open settings",         "button")
         Card(1)
         SetCtl["dictkey"] := ed := CardEdit("Push-to-talk key", SetPend["dictkey"],
                                             "the one your dictation app uses")
@@ -2351,6 +2219,7 @@ ShowSettings(*) {
         IniWrite(SetPend["post"],    cfg, "Hotkeys",   "Post")
         IniWrite(SetPend["fill"],    cfg, "Hotkeys",   "Fill")
         IniWrite(SetPend["button"],  cfg, "Hotkeys",   "Button")
+        IniWrite(SetPend["todo"],    cfg, "Hotkeys",   "Todo")
         IniWrite(SetPend["dictkey"], cfg, "Dictation", "Key")
         IniWrite(SetPend["comp"],    cfg, "Behavior",  "Composer")
         IniWrite(SetPend["auto"],    cfg, "Behavior",  "AutoSend")

@@ -9,7 +9,7 @@ Talk to your AI, snip a piece of your screen, or send the text you've highlighte
 - **Alt + 3** → sends the text you have **highlighted**.
 - **Alt + 4** → **selects everything** on the page and sends it.
 - **Alt + 0** → send by hand (only needed if you turn auto-send off).
-- **Alt + 7** → jump into your [to-do list](#the-to-do-list) and type the next job.
+- **Alt + 7** → jump into the [hub's](#the-hub) to-do list and type the next job.
 
 **Say something about it first.** When you snip or copy, a small **Send to AI** box pops up. Type whatever you want to say, grab more bits while you're at it — another screenshot, more highlighted text — and it all goes across in **one message** when you hit Enter. See [The composer box](#the-composer-box).
 
@@ -25,43 +25,28 @@ By default it sends to **whichever supported app you used most recently**, so yo
 
 ---
 
-## The floating button
+## The hub
 
-A small round **AI** button sits on top of everything, so settings are always one click away instead of a hunt through the system tray.
-
-| Do this | What happens |
-|---|---|
-| **Click it** | Settings open |
-| **Click it again** | Settings close |
-| **Drag it** | Moves anywhere you like, and stays there next time |
-| **Double-click it** | It goes away |
-
-Gone and you want it back? Press **Alt + 8**, or click the tray icon → **Show the floating button**. Same key hides it again.
-
-A double-click is whatever *you've* set a double-click to be — AI Snap asks Windows for your own speed and wobble tolerance rather than guessing, so two quick clicks in different spots stay two clicks, and a single click never turns into a double by being fast. A single click waits for that window to pass before it opens settings, so double-clicking to dismiss doesn't flash the settings window on its way out.
-
-It never takes focus, so clicking it doesn't interrupt whatever you were typing in. If you unplug a monitor it was living on, it comes back on-screen rather than stranded off the edge.
-
----
-
-## The to-do list
-
-A small card sits on your screen with everything you still have to do on it. Type in the box, press **Enter**, it's on the list. Click a job to tick it off. Click it again if you ticked the wrong one.
+One small card sits on top of everything: the round orange **AI** button and your to-do list, together. Click the circle for settings. Type in the box, press **Enter**, it's on the list. Click a job to tick it off, click it again if you ticked the wrong one.
 
 | Do this | What happens |
 |---|---|
-| **Type + Enter** | Adds it to the list |
+| **Click the AI circle** | Settings open. Click it again and they close |
+| **Type + Enter** | Adds the job to the list |
 | **Click a job** | Ticks it off — it drops to the bottom, struck through |
 | **Click a ticked one** | Puts it back on the list |
 | **Clear N done** | Bins the ticked ones |
-| **Drag the heading** | Moves the card, and it stays there next time |
+| **Drag the heading** | Moves the whole hub, circle and all, and it stays there next time |
 | **Alt + 7** | Puts the cursor in the box from wherever you are |
+| **Alt + 8** | Settings, without reaching for the mouse |
 
-**There is no close button, and that's deliberate.** No ✕, no Esc, no key to hide it, nothing in the tray to switch it off. Alt+F4 does nothing to it. Show desktop takes every other window off the screen and the list is still there when the dust settles — a watcher puts it back within a second or two. A list you can put away is a list you ignore, so this one you can't.
+**There is no close button, and that's deliberate.** No ✕, no Esc, no key to hide it, nothing in the tray to switch it off. Alt+F4 does nothing to it. Show desktop takes every other window off the screen and the hub is still there when the dust settles — a watcher puts it back within a second or two. A list you can put away is a list you ignore, so this one you can't.
 
 Still-to-do jobs sit at the top and ticked ones underneath, so the next thing is always the first thing you see. The count in the corner is how many are left.
 
 Your jobs live in **`todo.txt`** next to the script — one per line, `x ` in front of the done ones. It's a plain text file you can open in Notepad and edit by hand, and it's read back the moment AI Snap starts, so a restart, a reboot or a crash never loses your list.
+
+Drag it onto a second monitor and it stays there. Unplug that monitor and it comes back on-screen rather than stranded off the edge.
 
 ---
 
@@ -79,8 +64,7 @@ Under **Filling** in Settings you can change what it presses to move on: **Tab**
 
 ## What's new
 
-- **A to-do list that won't go away.** Type a job, press Enter, click it when it's done. No close button anywhere on it, on purpose. See [The to-do list](#the-to-do-list).
-- **A floating button.** A small round **AI** on top of everything — click for settings, click again to close, drag it anywhere, double-click to dismiss. See [The floating button](#the-floating-button).
+- **The hub.** The round **AI** button and a to-do list, one card on top of everything. Type a job, press Enter, click it when it's done. Click the circle for settings. No close button anywhere on it, on purpose. See [The hub](#the-hub).
 - **Filling mode.** Alt+9 or a switch in Settings, then just copy — each one lands in the next cell. See [Filling](#filling-copy-copy-copy).
 - **It says hello now.** First run gives you a short card with the three keys, instead of a tray icon and no idea what to do with it.
 - **Your settings are yours.** `config.ini` is no longer in the repo — the defaults ship as `config.example.ini` and get copied on first run, so updating never overwrites your apps and keys.
@@ -123,7 +107,8 @@ That's it. A small green **H** icon appears in your system tray (bottom-right, n
 | Send everything on the page (select-all) | **Alt + 4** |
 | Send by hand (if auto-send is off) | **Alt + 0** |
 | Start filling — every copy lands in the next cell | **Alt + 9** |
-| Show (or hide) the round floating button | **Alt + 8** |
+| Jump into the to-do list | **Alt + 7** |
+| Open (or close) settings | **Alt + 8** |
 
 Typical flow: highlight some text → **Alt+3** → type what you want to ask about it → **Enter**. Or **Alt+2**, drag a box, say your piece, Enter. Never leaving your work.
 
